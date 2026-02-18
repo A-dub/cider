@@ -1,0 +1,59 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (Apple Silicon)
+        run: |
+          clang -framework Foundation -framework CoreData \
+            -arch arm64 \
+            -O2 -o cider-arm64 cider.m
+
+      - name: Build (Intel)
+        run: |
+          clang -framework Foundation -framework CoreData \
+            -arch x86_64 \
+            -O2 -o cider-x86_64 cider.m
+
+      - name: Create Universal Binary
+        run: |
+          lipo -create cider-arm64 cider-x86_64 -output cider
+          file cider
+          ./cider --version || true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cider
+            cider-arm64
+            cider-x86_64
+          body: |
+            ## Install
+
+            Download the binary for your Mac:
+            - **`cider`** — Universal binary (Apple Silicon + Intel)
+            - **`cider-arm64`** — Apple Silicon only
+            - **`cider-x86_64`** — Intel only
+
+            Then:
+            ```bash
+            chmod +x cider
+            sudo cp cider /usr/local/bin/
+            ```
+
+            Or build from source:
+            ```bash
+            make && make install
+            ```
