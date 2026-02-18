@@ -1,8 +1,8 @@
-# ✏️ Jotty
+# ✏️ Jot
 
 > The only Apple Notes CLI that doesn't destroy your images.
 
-**Jotty** is a fast, native command-line interface for Apple Notes and Reminders on macOS. Unlike every other Notes CLI, Jotty uses Apple's internal CRDT engine to edit notes — meaning your images, attachments, and drawings stay exactly where you put them.
+**Jot** is a fast, native command-line interface for Apple Notes and Reminders on macOS. Unlike every other Notes CLI, Jot uses Apple's internal CRDT engine to edit notes — meaning your images, attachments, and drawings stay exactly where you put them.
 
 ## The Problem
 
@@ -10,31 +10,31 @@ Every existing Notes CLI uses AppleScript's `set body` to edit notes. This **des
 
 > ⚠️ Be careful when using --edit and --move flags with notes that include images/attachments.
 
-Jotty doesn't have that problem.
+Jot doesn't have that problem.
 
 ## How It Works
 
-Apple Notes stores text as a CRDT (Conflict-free Replicated Data Type) using a private framework called `NotesShared.framework`. Jotty loads this framework at runtime and calls the same editing API that Notes.app uses internally:
+Apple Notes stores text as a CRDT (Conflict-free Replicated Data Type) using a private framework called `NotesShared.framework`. Jot loads this framework at runtime and calls the same editing API that Notes.app uses internally:
 
 ```
 ICTTMergeableString → beginEditing → replaceCharactersInRange:withString: → endEditing
 ```
 
-Attachments are `U+FFFC` characters in the CRDT string. By editing text around them at the character level, Jotty never touches the attachment markers — they stay in their original position.
+Attachments are `U+FFFC` characters in the CRDT string. By editing text around them at the character level, Jot never touches the attachment markers — they stay in their original position.
 
 ## Install
 
 ```bash
-git clone https://github.com/A-dub/jotty
-cd jotty
+git clone https://github.com/A-dub/jot
+cd jot
 make
 make install   # copies to /usr/local/bin
 ```
 
 Or manually:
 ```bash
-clang -framework Foundation -framework CoreData -o jotty jotty.m
-cp jotty /usr/local/bin/
+clang -framework Foundation -framework CoreData -o jot jot.m
+cp jot /usr/local/bin/
 ```
 
 **Requirements:** macOS 12+ (Monterey or later). No Python, no pip, no Homebrew dependencies. Just `clang`.
@@ -45,69 +45,69 @@ cp jotty /usr/local/bin/
 
 ```bash
 # List all notes
-jotty notes
+jot notes
 
 # Filter by folder
-jotty notes -f "Work"
+jot notes -f "Work"
 
 # List all folders
-jotty notes -fl
+jot notes -fl
 
 # View note #3 (shows attachment positions)
-jotty notes -v 3
+jot notes -v 3
 
 # Add a new note (opens $EDITOR)
-jotty notes -a -f "Personal"
+jot notes -a -f "Personal"
 
 # Add from stdin
-echo "Quick thought" | jotty notes -a -f "Notes"
+echo "Quick thought" | jot notes -a -f "Notes"
 
 # Edit note #3 — attachments stay in place! ✨
-jotty notes -e 3
+jot notes -e 3
 
 # Delete note #3
-jotty notes -d 3
+jot notes -d 3
 
 # Move note #3 to Archive
-jotty notes -m 3 -f "Archive"
+jot notes -m 3 -f "Archive"
 
 # Search notes
-jotty notes -s "meeting"
+jot notes -s "meeting"
 
 # Export all notes to HTML
-jotty notes --export ~/Desktop/notes-backup
+jot notes --export ~/Desktop/notes-backup
 
 # Attach a file to note #3
-jotty notes --attach 3 ~/Photos/vacation.jpg
+jot notes --attach 3 ~/Photos/vacation.jpg
 ```
 
 ### Reminders
 
 ```bash
 # List incomplete reminders
-jotty rem
+jot rem
 
 # Add a reminder
-jotty rem -a "Buy groceries"
+jot rem -a "Buy groceries"
 
 # Add with due date
-jotty rem -a "Doctor" "March 15, 2026 9:00 AM"
+jot rem -a "Doctor" "March 15, 2026 9:00 AM"
 
 # Edit reminder #2
-jotty rem -e 2 "Updated title"
+jot rem -e 2 "Updated title"
 
 # Complete reminder #1
-jotty rem -c 1
+jot rem -c 1
 
 # Delete reminder #2
-jotty rem -d 2
+jot rem -d 2
 ```
 
 ## How Editing Works
 
-When you run `jotty notes -e 3`:
+When you run `jot notes -e 3`:
 
-1. Jotty reads the note's CRDT string from the Notes database
+1. Jot reads the note's CRDT string from the Notes database
 2. Attachment markers (`U+FFFC`) become visible placeholders:
    ```
    My vacation photos
@@ -118,7 +118,7 @@ When you run `jotty notes -e 3`:
    ```
 3. Your `$EDITOR` opens with the text
 4. You edit the text — leave placeholders intact
-5. On save, Jotty computes the minimal diff and applies it via the CRDT API
+5. On save, Jot computes the minimal diff and applies it via the CRDT API
 6. Attachments remain in their original position. iCloud syncs normally.
 
 ## Architecture
@@ -135,7 +135,7 @@ Single Objective-C file. No external dependencies. Compiles in under a second.
 
 ## Private Framework Details
 
-Jotty uses `NotesShared.framework`, loaded via `dlopen()` at runtime. If the framework isn't available (wrong macOS version, changes in a future update), Jotty fails gracefully with a clear error message.
+Jot uses `NotesShared.framework`, loaded via `dlopen()` at runtime. If the framework isn't available (wrong macOS version, changes in a future update), Jot fails gracefully with a clear error message.
 
 Key classes used:
 
@@ -146,11 +146,11 @@ Key classes used:
 | `ICFolder` | Folder entity |
 | `ICTTMergeableString` | CRDT string — the magic that preserves attachments |
 
-See [Reverse Engineering Notes](https://github.com/A-dub/jotty/wiki) for the full technical deep-dive on how these APIs were discovered.
+See [Reverse Engineering Notes](https://github.com/A-dub/jot/wiki) for the full technical deep-dive on how these APIs were discovered.
 
 ## Comparison with memo
 
-| Feature | [memo](https://github.com/antoniorodr/memo) | Jotty |
+| Feature | [memo](https://github.com/antoniorodr/memo) | Jot |
 |---------|------|-------|
 | List notes | ✅ | ✅ |
 | View notes | ✅ (Markdown) | ✅ (plain text + attachment markers) |
@@ -170,9 +170,9 @@ See [Reverse Engineering Notes](https://github.com/A-dub/jotty/wiki) for the ful
 
 **"Not authorized to send Apple events"** — macOS needs permission for automation. Go to System Settings → Privacy & Security → Automation and allow your terminal app to control Notes and Reminders.
 
-**"Failed to load NotesShared.framework"** — You're on an unsupported macOS version, or Apple changed the framework location. Check the [troubleshooting guide](https://github.com/A-dub/jotty/wiki).
+**"Failed to load NotesShared.framework"** — You're on an unsupported macOS version, or Apple changed the framework location. Check the [troubleshooting guide](https://github.com/A-dub/jot/wiki).
 
-**Reminders not working** — Reminders requires a one-time automation approval. Run any `jotty rem` command from Terminal.app (not over SSH) the first time to trigger the permission dialog.
+**Reminders not working** — Reminders requires a one-time automation approval. Run any `jot rem` command from Terminal.app (not over SSH) the first time to trigger the permission dialog.
 
 ## License
 

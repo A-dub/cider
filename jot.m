@@ -1,10 +1,10 @@
 /**
- * jotty — Apple Notes CLI with CRDT attachment support
+ * jot — Apple Notes CLI with CRDT attachment support
  *
  * Uses Apple's private NotesShared.framework CRDT API (ICTTMergeableString)
  * to edit notes while preserving attachments in their original position.
  *
- * Compile: clang -framework Foundation -framework CoreData -o jotty jotty.m
+ * Compile: clang -framework Foundation -framework CoreData -o jot jot.m
  */
 
 #import <Foundation/Foundation.h>
@@ -532,7 +532,7 @@ void cmdNotesAdd(NSString *folder) {
         content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     } else {
         NSString *tmp = [NSTemporaryDirectory()
-                         stringByAppendingPathComponent:@"jotty_new.txt"];
+                         stringByAppendingPathComponent:@"jot_new.txt"];
         [@"" writeToFile:tmp atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
         NSString *editor = [[[NSProcessInfo processInfo] environment]
@@ -612,7 +612,7 @@ void cmdNotesEdit(NSUInteger idx) {
 
     // Write to temp file
     NSString *tmp = [NSTemporaryDirectory()
-                     stringByAppendingPathComponent:@"jotty_edit.txt"];
+                     stringByAppendingPathComponent:@"jot_edit.txt"];
     NSError *writeErr = nil;
     [editText writeToFile:tmp
                atomically:YES
@@ -846,7 +846,7 @@ void cmdNotesExport(NSString *exportPath) {
         i++;
     }
 
-    [index appendString:@"</ul><p><em>Exported by jotty v" VERSION "</em></p></body></html>"];
+    [index appendString:@"</ul><p><em>Exported by jot v" VERSION "</em></p></body></html>"];
     NSString *indexPath = [exportPath stringByAppendingPathComponent:@"index.html"];
     [index writeToFile:indexPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
@@ -1042,13 +1042,13 @@ void cmdRemComplete(NSUInteger idx) {
 
 void printHelp(void) {
     printf(
-"jotty v" VERSION " — Apple Notes CLI with CRDT attachment support\n"
+"jot v" VERSION " — Apple Notes CLI with CRDT attachment support\n"
 "\n"
 "USAGE:\n"
-"  jotty notes [options]    Notes operations\n"
-"  jotty rem [options]      Reminders operations\n"
-"  jotty --version          Show version\n"
-"  jotty --help             Show this help\n"
+"  jot notes [options]    Notes operations\n"
+"  jot rem [options]      Reminders operations\n"
+"  jot --version          Show version\n"
+"  jot --help             Show this help\n"
 "\n"
 "NOTES OPTIONS:\n"
 "  (no args)                    List all notes\n"
@@ -1081,35 +1081,35 @@ void printHelp(void) {
 
 void printNotesHelp(void) {
     printf(
-"jotty notes — Apple Notes CLI\n"
+"jot notes — Apple Notes CLI\n"
 "\n"
 "USAGE:\n"
-"  jotty notes                     List all notes\n"
-"  jotty notes -f <folder>         List notes in folder\n"
-"  jotty notes -fl                 List all folders\n"
-"  jotty notes -v <N>              View note N\n"
-"  jotty notes -a                  Add note (reads stdin or $EDITOR)\n"
-"  jotty notes -a -f <folder>      Add note to folder\n"
-"  jotty notes -e <N>              Edit note N via CRDT (preserves attachments)\n"
-"  jotty notes -d <N>              Delete note N\n"
-"  jotty notes -m <N> -f <folder>  Move note N to folder\n"
-"  jotty notes -s <query>          Search notes\n"
-"  jotty notes --export <path>     Export notes to HTML\n"
-"  jotty notes --attach <N> <file> Attach file to note N\n"
+"  jot notes                     List all notes\n"
+"  jot notes -f <folder>         List notes in folder\n"
+"  jot notes -fl                 List all folders\n"
+"  jot notes -v <N>              View note N\n"
+"  jot notes -a                  Add note (reads stdin or $EDITOR)\n"
+"  jot notes -a -f <folder>      Add note to folder\n"
+"  jot notes -e <N>              Edit note N via CRDT (preserves attachments)\n"
+"  jot notes -d <N>              Delete note N\n"
+"  jot notes -m <N> -f <folder>  Move note N to folder\n"
+"  jot notes -s <query>          Search notes\n"
+"  jot notes --export <path>     Export notes to HTML\n"
+"  jot notes --attach <N> <file> Attach file to note N\n"
     );
 }
 
 void printRemHelp(void) {
     printf(
-"jotty rem — Reminders CLI\n"
+"jot rem — Reminders CLI\n"
 "\n"
 "USAGE:\n"
-"  jotty rem                       List all incomplete reminders\n"
-"  jotty rem -a <title>            Add reminder\n"
-"  jotty rem -a <title> <due>      Add reminder with due date\n"
-"  jotty rem -e <N> <new-title>    Edit reminder N\n"
-"  jotty rem -d <N>                Delete reminder N\n"
-"  jotty rem -c <N>                Complete reminder N\n"
+"  jot rem                       List all incomplete reminders\n"
+"  jot rem -a <title>            Add reminder\n"
+"  jot rem -a <title> <due>      Add reminder with due date\n"
+"  jot rem -e <N> <new-title>    Edit reminder N\n"
+"  jot rem -d <N>                Delete reminder N\n"
+"  jot rem -c <N>                Complete reminder N\n"
     );
 }
 
@@ -1130,7 +1130,7 @@ int main(int argc, char *argv[]) {
         // ── top-level flags ──────────────────────────────────────────────────
         if ([cmd isEqualToString:@"--version"] ||
             [cmd isEqualToString:@"-V"]) {
-            printf("jotty v" VERSION "\n");
+            printf("jot v" VERSION "\n");
             return 0;
         }
         if ([cmd isEqualToString:@"--help"] ||
@@ -1150,7 +1150,7 @@ int main(int argc, char *argv[]) {
             if (!initNotesContext()) return 1;
 
             if (argc == 2) {
-                // jotty notes
+                // jot notes
                 cmdNotesList(nil);
                 return 0;
             }
@@ -1162,7 +1162,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-f"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty notes -f <folder>\n");
+                    fprintf(stderr, "Usage: jot notes -f <folder>\n");
                     return 1;
                 }
                 NSString *folder = [NSString stringWithUTF8String:argv[3]];
@@ -1170,7 +1170,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-v"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty notes -v <N>\n");
+                    fprintf(stderr, "Usage: jot notes -v <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1187,7 +1187,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-e"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty notes -e <N>\n");
+                    fprintf(stderr, "Usage: jot notes -e <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1195,7 +1195,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-d"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty notes -d <N>\n");
+                    fprintf(stderr, "Usage: jot notes -d <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1203,7 +1203,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-m"]) {
                 if (argc < 6 || strcmp(argv[4], "-f") != 0) {
-                    fprintf(stderr, "Usage: jotty notes -m <N> -f <folder>\n");
+                    fprintf(stderr, "Usage: jot notes -m <N> -f <folder>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1212,7 +1212,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-s"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty notes -s <query>\n");
+                    fprintf(stderr, "Usage: jot notes -s <query>\n");
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
@@ -1220,7 +1220,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"--export"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty notes --export <path>\n");
+                    fprintf(stderr, "Usage: jot notes --export <path>\n");
                     return 1;
                 }
                 NSString *path = [NSString stringWithUTF8String:argv[3]];
@@ -1228,7 +1228,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"--attach"]) {
                 if (argc < 5) {
-                    fprintf(stderr, "Usage: jotty notes --attach <N> <file>\n");
+                    fprintf(stderr, "Usage: jot notes --attach <N> <file>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1259,7 +1259,7 @@ int main(int argc, char *argv[]) {
 
             if ([opt isEqualToString:@"-a"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty rem -a <title> [due-date]\n");
+                    fprintf(stderr, "Usage: jot rem -a <title> [due-date]\n");
                     return 1;
                 }
                 NSString *title = [NSString stringWithUTF8String:argv[3]];
@@ -1268,7 +1268,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-e"]) {
                 if (argc < 5) {
-                    fprintf(stderr, "Usage: jotty rem -e <N> <new-title>\n");
+                    fprintf(stderr, "Usage: jot rem -e <N> <new-title>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1277,7 +1277,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-d"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty rem -d <N>\n");
+                    fprintf(stderr, "Usage: jot rem -d <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1285,7 +1285,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-c"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: jotty rem -c <N>\n");
+                    fprintf(stderr, "Usage: jot rem -c <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1300,7 +1300,7 @@ int main(int argc, char *argv[]) {
         }
 
         fprintf(stderr, "Unknown command: %s\n"
-                "Run 'jotty --help' for usage.\n", [cmd UTF8String]);
+                "Run 'jot --help' for usage.\n", [cmd UTF8String]);
         return 1;
     }
 }
