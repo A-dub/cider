@@ -1,10 +1,10 @@
 /**
- * crdtnotes — Apple Notes CLI with CRDT attachment support
+ * jotty — Apple Notes CLI with CRDT attachment support
  *
  * Uses Apple's private NotesShared.framework CRDT API (ICTTMergeableString)
  * to edit notes while preserving attachments in their original position.
  *
- * Compile: clang -framework Foundation -framework CoreData -o crdtnotes crdtnotes.m
+ * Compile: clang -framework Foundation -framework CoreData -o jotty jotty.m
  */
 
 #import <Foundation/Foundation.h>
@@ -532,7 +532,7 @@ void cmdNotesAdd(NSString *folder) {
         content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     } else {
         NSString *tmp = [NSTemporaryDirectory()
-                         stringByAppendingPathComponent:@"crdtnotes_new.txt"];
+                         stringByAppendingPathComponent:@"jotty_new.txt"];
         [@"" writeToFile:tmp atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
         NSString *editor = [[[NSProcessInfo processInfo] environment]
@@ -612,7 +612,7 @@ void cmdNotesEdit(NSUInteger idx) {
 
     // Write to temp file
     NSString *tmp = [NSTemporaryDirectory()
-                     stringByAppendingPathComponent:@"crdtnotes_edit.txt"];
+                     stringByAppendingPathComponent:@"jotty_edit.txt"];
     NSError *writeErr = nil;
     [editText writeToFile:tmp
                atomically:YES
@@ -846,7 +846,7 @@ void cmdNotesExport(NSString *exportPath) {
         i++;
     }
 
-    [index appendString:@"</ul><p><em>Exported by crdtnotes v" VERSION "</em></p></body></html>"];
+    [index appendString:@"</ul><p><em>Exported by jotty v" VERSION "</em></p></body></html>"];
     NSString *indexPath = [exportPath stringByAppendingPathComponent:@"index.html"];
     [index writeToFile:indexPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
@@ -1042,13 +1042,13 @@ void cmdRemComplete(NSUInteger idx) {
 
 void printHelp(void) {
     printf(
-"crdtnotes v" VERSION " — Apple Notes CLI with CRDT attachment support\n"
+"jotty v" VERSION " — Apple Notes CLI with CRDT attachment support\n"
 "\n"
 "USAGE:\n"
-"  crdtnotes notes [options]    Notes operations\n"
-"  crdtnotes rem [options]      Reminders operations\n"
-"  crdtnotes --version          Show version\n"
-"  crdtnotes --help             Show this help\n"
+"  jotty notes [options]    Notes operations\n"
+"  jotty rem [options]      Reminders operations\n"
+"  jotty --version          Show version\n"
+"  jotty --help             Show this help\n"
 "\n"
 "NOTES OPTIONS:\n"
 "  (no args)                    List all notes\n"
@@ -1081,35 +1081,35 @@ void printHelp(void) {
 
 void printNotesHelp(void) {
     printf(
-"crdtnotes notes — Apple Notes CLI\n"
+"jotty notes — Apple Notes CLI\n"
 "\n"
 "USAGE:\n"
-"  crdtnotes notes                     List all notes\n"
-"  crdtnotes notes -f <folder>         List notes in folder\n"
-"  crdtnotes notes -fl                 List all folders\n"
-"  crdtnotes notes -v <N>              View note N\n"
-"  crdtnotes notes -a                  Add note (reads stdin or $EDITOR)\n"
-"  crdtnotes notes -a -f <folder>      Add note to folder\n"
-"  crdtnotes notes -e <N>              Edit note N via CRDT (preserves attachments)\n"
-"  crdtnotes notes -d <N>              Delete note N\n"
-"  crdtnotes notes -m <N> -f <folder>  Move note N to folder\n"
-"  crdtnotes notes -s <query>          Search notes\n"
-"  crdtnotes notes --export <path>     Export notes to HTML\n"
-"  crdtnotes notes --attach <N> <file> Attach file to note N\n"
+"  jotty notes                     List all notes\n"
+"  jotty notes -f <folder>         List notes in folder\n"
+"  jotty notes -fl                 List all folders\n"
+"  jotty notes -v <N>              View note N\n"
+"  jotty notes -a                  Add note (reads stdin or $EDITOR)\n"
+"  jotty notes -a -f <folder>      Add note to folder\n"
+"  jotty notes -e <N>              Edit note N via CRDT (preserves attachments)\n"
+"  jotty notes -d <N>              Delete note N\n"
+"  jotty notes -m <N> -f <folder>  Move note N to folder\n"
+"  jotty notes -s <query>          Search notes\n"
+"  jotty notes --export <path>     Export notes to HTML\n"
+"  jotty notes --attach <N> <file> Attach file to note N\n"
     );
 }
 
 void printRemHelp(void) {
     printf(
-"crdtnotes rem — Reminders CLI\n"
+"jotty rem — Reminders CLI\n"
 "\n"
 "USAGE:\n"
-"  crdtnotes rem                       List all incomplete reminders\n"
-"  crdtnotes rem -a <title>            Add reminder\n"
-"  crdtnotes rem -a <title> <due>      Add reminder with due date\n"
-"  crdtnotes rem -e <N> <new-title>    Edit reminder N\n"
-"  crdtnotes rem -d <N>                Delete reminder N\n"
-"  crdtnotes rem -c <N>                Complete reminder N\n"
+"  jotty rem                       List all incomplete reminders\n"
+"  jotty rem -a <title>            Add reminder\n"
+"  jotty rem -a <title> <due>      Add reminder with due date\n"
+"  jotty rem -e <N> <new-title>    Edit reminder N\n"
+"  jotty rem -d <N>                Delete reminder N\n"
+"  jotty rem -c <N>                Complete reminder N\n"
     );
 }
 
@@ -1130,7 +1130,7 @@ int main(int argc, char *argv[]) {
         // ── top-level flags ──────────────────────────────────────────────────
         if ([cmd isEqualToString:@"--version"] ||
             [cmd isEqualToString:@"-V"]) {
-            printf("crdtnotes v" VERSION "\n");
+            printf("jotty v" VERSION "\n");
             return 0;
         }
         if ([cmd isEqualToString:@"--help"] ||
@@ -1150,7 +1150,7 @@ int main(int argc, char *argv[]) {
             if (!initNotesContext()) return 1;
 
             if (argc == 2) {
-                // crdtnotes notes
+                // jotty notes
                 cmdNotesList(nil);
                 return 0;
             }
@@ -1162,7 +1162,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-f"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes notes -f <folder>\n");
+                    fprintf(stderr, "Usage: jotty notes -f <folder>\n");
                     return 1;
                 }
                 NSString *folder = [NSString stringWithUTF8String:argv[3]];
@@ -1170,7 +1170,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-v"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes notes -v <N>\n");
+                    fprintf(stderr, "Usage: jotty notes -v <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1187,7 +1187,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-e"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes notes -e <N>\n");
+                    fprintf(stderr, "Usage: jotty notes -e <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1195,7 +1195,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-d"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes notes -d <N>\n");
+                    fprintf(stderr, "Usage: jotty notes -d <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1203,7 +1203,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-m"]) {
                 if (argc < 6 || strcmp(argv[4], "-f") != 0) {
-                    fprintf(stderr, "Usage: crdtnotes notes -m <N> -f <folder>\n");
+                    fprintf(stderr, "Usage: jotty notes -m <N> -f <folder>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1212,7 +1212,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-s"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes notes -s <query>\n");
+                    fprintf(stderr, "Usage: jotty notes -s <query>\n");
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
@@ -1220,7 +1220,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"--export"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes notes --export <path>\n");
+                    fprintf(stderr, "Usage: jotty notes --export <path>\n");
                     return 1;
                 }
                 NSString *path = [NSString stringWithUTF8String:argv[3]];
@@ -1228,7 +1228,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"--attach"]) {
                 if (argc < 5) {
-                    fprintf(stderr, "Usage: crdtnotes notes --attach <N> <file>\n");
+                    fprintf(stderr, "Usage: jotty notes --attach <N> <file>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1259,7 +1259,7 @@ int main(int argc, char *argv[]) {
 
             if ([opt isEqualToString:@"-a"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes rem -a <title> [due-date]\n");
+                    fprintf(stderr, "Usage: jotty rem -a <title> [due-date]\n");
                     return 1;
                 }
                 NSString *title = [NSString stringWithUTF8String:argv[3]];
@@ -1268,7 +1268,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-e"]) {
                 if (argc < 5) {
-                    fprintf(stderr, "Usage: crdtnotes rem -e <N> <new-title>\n");
+                    fprintf(stderr, "Usage: jotty rem -e <N> <new-title>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1277,7 +1277,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-d"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes rem -d <N>\n");
+                    fprintf(stderr, "Usage: jotty rem -d <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1285,7 +1285,7 @@ int main(int argc, char *argv[]) {
 
             } else if ([opt isEqualToString:@"-c"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: crdtnotes rem -c <N>\n");
+                    fprintf(stderr, "Usage: jotty rem -c <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
@@ -1300,7 +1300,7 @@ int main(int argc, char *argv[]) {
         }
 
         fprintf(stderr, "Unknown command: %s\n"
-                "Run 'crdtnotes --help' for usage.\n", [cmd UTF8String]);
+                "Run 'jotty --help' for usage.\n", [cmd UTF8String]);
         return 1;
     }
 }

@@ -1,46 +1,43 @@
-# crdtnotes
+# ✏️ Jotty
 
-> Apple Notes CLI with CRDT attachment support
+> The only Apple Notes CLI that doesn't destroy your images.
 
-`crdtnotes` is a command-line interface for Apple Notes that uses Apple's private `NotesShared.framework` CRDT API (`ICTTMergeableString`) to edit notes while **preserving attachments in their original positions** — something that `AppleScript set body` cannot do.
+**Jotty** is a fast, native command-line interface for Apple Notes and Reminders on macOS. Unlike every other Notes CLI, Jotty uses Apple's internal CRDT engine to edit notes — meaning your images, attachments, and drawings stay exactly where you put them.
 
 ## The Problem
 
-Every existing Notes CLI (including the Python-based [`memo`](https://github.com/antoniorodr/memo)) uses AppleScript's `set body of note to "..."` to edit note content. This **destroys all images and attachments** because it replaces the entire note body with plain HTML.
+Every existing Notes CLI uses AppleScript's `set body` to edit notes. This **destroys all images and attachments**. The [memo](https://github.com/antoniorodr/memo) CLI even warns you about it:
 
-## The Solution
+> ⚠️ Be careful when using --edit and --move flags with notes that include images/attachments.
 
-`crdtnotes` uses the same CRDT (Conflict-free Replicated Data Type) engine that Apple's own Notes app uses internally:
+Jotty doesn't have that problem.
+
+## How It Works
+
+Apple Notes stores text as a CRDT (Conflict-free Replicated Data Type) using a private framework called `NotesShared.framework`. Jotty loads this framework at runtime and calls the same editing API that Notes.app uses internally:
 
 ```
-ICTTMergeableString → beginEditing → replaceCharactersInRange:withString: → endEditing → generateIdsForLocalChanges
+ICTTMergeableString → beginEditing → replaceCharactersInRange:withString: → endEditing
 ```
 
-Attachments are represented as `U+FFFC` (Object Replacement Character) markers in the CRDT string. By operating at the character level, `crdtnotes` can edit text content around attachment positions without disturbing the attachments themselves.
+Attachments are `U+FFFC` characters in the CRDT string. By editing text around them at the character level, Jotty never touches the attachment markers — they stay in their original position.
 
-## Installation
-
-### Build from source (macOS only)
+## Install
 
 ```bash
-git clone https://github.com/a-d-w/crdtnotes
-cd crdtnotes
-clang -framework Foundation -framework CoreData -o crdtnotes crdtnotes.m
-sudo cp crdtnotes /usr/local/bin/
-```
-
-Or use the Makefile:
-
-```bash
+git clone https://github.com/A-dub/jotty
+cd jotty
 make
-make install
+make install   # copies to /usr/local/bin
 ```
 
-### Requirements
+Or manually:
+```bash
+clang -framework Foundation -framework CoreData -o jotty jotty.m
+cp jotty /usr/local/bin/
+```
 
-- macOS 12+ (Monterey or later recommended)
-- Apple Notes app (default macOS app)
-- No external dependencies
+**Requirements:** macOS 12+ (Monterey or later). No Python, no pip, no Homebrew dependencies. Just `clang`.
 
 ## Usage
 
@@ -48,153 +45,140 @@ make install
 
 ```bash
 # List all notes
-crdtnotes notes
+jotty notes
 
-# List notes in a folder
-crdtnotes notes -f "Work"
+# Filter by folder
+jotty notes -f "Work"
 
 # List all folders
-crdtnotes notes -fl
+jotty notes -fl
 
-# View note 3
-crdtnotes notes -v 3
+# View note #3 (shows attachment positions)
+jotty notes -v 3
 
-# Add a new note (opens $EDITOR, or reads from stdin)
-crdtnotes notes -a
-echo "Hello world" | crdtnotes notes -a
+# Add a new note (opens $EDITOR)
+jotty notes -a -f "Personal"
 
-# Add note to a specific folder
-crdtnotes notes -a -f "Work"
+# Add from stdin
+echo "Quick thought" | jotty notes -a -f "Notes"
 
-# Edit note 3 — uses CRDT API, preserves attachments!
-crdtnotes notes -e 3
+# Edit note #3 — attachments stay in place! ✨
+jotty notes -e 3
 
-# Delete note 3
-crdtnotes notes -d 3
+# Delete note #3
+jotty notes -d 3
 
-# Move note 3 to "Archive" folder
-crdtnotes notes -m 3 -f "Archive"
+# Move note #3 to Archive
+jotty notes -m 3 -f "Archive"
 
 # Search notes
-crdtnotes notes -s "meeting notes"
+jotty notes -s "meeting"
 
 # Export all notes to HTML
-crdtnotes notes --export ~/Desktop/notes-export
+jotty notes --export ~/Desktop/notes-backup
 
-# Add a file attachment to note 3
-crdtnotes notes --attach 3 ~/Downloads/photo.jpg
+# Attach a file to note #3
+jotty notes --attach 3 ~/Photos/vacation.jpg
 ```
 
 ### Reminders
 
 ```bash
-# List all incomplete reminders
-crdtnotes rem
+# List incomplete reminders
+jotty rem
 
 # Add a reminder
-crdtnotes rem -a "Buy groceries"
+jotty rem -a "Buy groceries"
 
-# Add a reminder with a due date
-crdtnotes rem -a "Doctor appointment" "December 31, 2025 9:00 AM"
+# Add with due date
+jotty rem -a "Doctor" "March 15, 2026 9:00 AM"
 
-# Edit reminder 2
-crdtnotes rem -e 2 "Grocery run"
+# Edit reminder #2
+jotty rem -e 2 "Updated title"
 
-# Delete reminder 2
-crdtnotes rem -d 2
+# Complete reminder #1
+jotty rem -c 1
 
-# Complete reminder 1
-crdtnotes rem -c 1
+# Delete reminder #2
+jotty rem -d 2
 ```
 
-### Other
+## How Editing Works
 
-```bash
-crdtnotes --version
-crdtnotes --help
-crdtnotes notes --help
-crdtnotes rem --help
-```
+When you run `jotty notes -e 3`:
 
-## How CRDT Editing Works
+1. Jotty reads the note's CRDT string from the Notes database
+2. Attachment markers (`U+FFFC`) become visible placeholders:
+   ```
+   My vacation photos
 
-When you run `crdtnotes notes -e <N>`:
+   %%ATTACHMENT_0_beach.jpg%%
 
-1. The note's raw text (with `U+FFFC` attachment markers) is fetched from the Notes database via `ICNoteContext`
-2. Each `U+FFFC` is replaced with a `%%ATTACHMENT_N_filename%%` placeholder so you can see where attachments are
-3. Your `$EDITOR` opens with the editable text
-4. When you save and exit, the placeholders are restored to `U+FFFC`
-5. A **longest-common-prefix/suffix diff** finds the minimal changed region
-6. The CRDT API (`replaceCharactersInRange:withString:`) applies the change — only touching the text you edited, leaving attachment markers untouched
-7. The change is saved to the Notes database
-
-### Example
-
-If a note contains:
-```
-My vacation photos
-
-[📎 beach.jpg]
-
-What a great trip!
-```
-
-In the editor you see:
-```
-My vacation photos
-
-%%ATTACHMENT_0_beach.jpg%%
-
-What a great trip!
-```
-
-You can freely edit the text before and after the marker. The marker itself must be left intact. On save, the attachment stays in place.
+   What a great trip!
+   ```
+3. Your `$EDITOR` opens with the text
+4. You edit the text — leave placeholders intact
+5. On save, Jotty computes the minimal diff and applies it via the CRDT API
+6. Attachments remain in their original position. iCloud syncs normally.
 
 ## Architecture
 
-Single-file Objective-C (`crdtnotes.m`), compiled with `clang`. No external dependencies.
+| Component | How |
+|-----------|-----|
+| **Edit** | `ICTTMergeableString` CRDT API (preserves attachments) |
+| **List / View / Search** | Core Data fetch via `ICNoteContext` (fast, no AppleScript) |
+| **Add / Delete / Move** | `NSAppleScript` (reliable, handles iCloud sync) |
+| **Attach** | `NSAppleScript` (`make new attachment`) |
+| **Reminders** | `NSAppleScript` (Reminders.app) |
 
-- **Notes operations**: Use `ICNoteContext` + `ICTTMergeableString` (CoreData / NotesShared.framework)
-- **Add/Delete/Move/Attach**: Use `NSAppleScript` (simpler, well-tested)
-- **Edit**: Uses CRDT API for attachment-safe edits
-- **Reminders**: Use `NSAppleScript` (Reminders app)
-- **Search**: Core Data predicate fetch (fast, no AppleScript needed)
+Single Objective-C file. No external dependencies. Compiles in under a second.
 
-## Private Framework
+## Private Framework Details
 
-`crdtnotes` uses `NotesShared.framework`, a private Apple framework. Key classes:
+Jotty uses `NotesShared.framework`, loaded via `dlopen()` at runtime. If the framework isn't available (wrong macOS version, changes in a future update), Jotty fails gracefully with a clear error message.
+
+Key classes used:
 
 | Class | Purpose |
 |-------|---------|
 | `ICNoteContext` | Opens the Notes Core Data store |
-| `ICNote` | Core Data entity for a note |
-| `ICFolder` | Core Data entity for a folder |
-| `ICTTMergeableString` | CRDT string with attachment positions |
+| `ICNote` | Note entity (title, body, attachments) |
+| `ICFolder` | Folder entity |
+| `ICTTMergeableString` | CRDT string — the magic that preserves attachments |
 
-The framework is loaded at runtime via `dlopen()`, so the binary won't crash on systems where it's unavailable — it gracefully reports an error instead.
+See [Reverse Engineering Notes](https://github.com/A-dub/jotty/wiki) for the full technical deep-dive on how these APIs were discovered.
 
 ## Comparison with memo
 
-| Feature | memo (Python) | crdtnotes |
-|---------|--------------|-----------|
+| Feature | [memo](https://github.com/antoniorodr/memo) | Jotty |
+|---------|------|-------|
 | List notes | ✅ | ✅ |
-| View notes | ✅ | ✅ |
+| View notes | ✅ (Markdown) | ✅ (plain text + attachment markers) |
 | Add notes | ✅ | ✅ |
-| Edit notes | ⚠️ destroys attachments | ✅ CRDT-safe |
+| **Edit notes** | ⚠️ **destroys attachments** | ✅ **CRDT-safe** |
 | Delete notes | ✅ | ✅ |
-| Move notes | ✅ | ✅ |
-| Search | ✅ | ✅ |
-| Export HTML | ❌ | ✅ |
-| Attachment-safe edit | ❌ | ✅ |
-| Add attachment | ❌ | ✅ |
-| No Python required | ❌ | ✅ |
-| Speed | Slow (AppleScript) | Fast (CoreData) |
+| Move notes | ⚠️ recreates note | ✅ native move |
+| Search | ✅ (fzf) | ✅ (Core Data) |
+| Export | ✅ HTML+MD | ✅ HTML |
+| **Attach files** | ❌ | ✅ |
+| **Preserve images on edit** | ❌ | ✅ |
+| Dependencies | Python, Click, mistune, html2text | **None** |
+| Language | Python | Objective-C |
+| Speed | Slow (AppleScript for everything) | Fast (Core Data for reads) |
+
+## Troubleshooting
+
+**"Not authorized to send Apple events"** — macOS needs permission for automation. Go to System Settings → Privacy & Security → Automation and allow your terminal app to control Notes and Reminders.
+
+**"Failed to load NotesShared.framework"** — You're on an unsupported macOS version, or Apple changed the framework location. Check the [troubleshooting guide](https://github.com/A-dub/jotty/wiki).
+
+**Reminders not working** — Reminders requires a one-time automation approval. Run any `jotty rem` command from Terminal.app (not over SSH) the first time to trigger the permission dialog.
 
 ## License
 
 MIT
 
-## Acknowledgements
+## Credits
 
-- [`memo`](https://github.com/antoniorodr/memo) by Antonio Rodriguez — the Python CLI this was inspired by
-- Apple's Notes engineering team for building a CRDT engine accessible via private frameworks
+- Inspired by [`memo`](https://github.com/antoniorodr/memo) by Antonio Rodriguez
+- Built by reverse-engineering Apple's `NotesShared.framework` CRDT engine

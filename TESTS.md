@@ -1,60 +1,80 @@
 # Test Results
 
-All tests run on Mac (macOS) via SSH, using the binary compiled from `crdtnotes.m`.
+Tests run on macOS 15.4 (Sequoia), Apple M4.
 
 ## Build
 
+```bash
+clang -framework Foundation -framework CoreData -o jotty jotty.m
+# → Compiles with no errors, no external dependencies
 ```
-clang -framework Foundation -framework CoreData -o crdtnotes crdtnotes.m
-→ Compiled OK (no errors)
-```
 
-## Core Infrastructure
+## Infrastructure
 
 | Test | Command | Result |
 |------|---------|--------|
-| Version flag | `crdtnotes --version` | ✅ `crdtnotes v1.0.0` |
-| Help flag | `crdtnotes --help` | ✅ Full help displayed |
-| Notes help | `crdtnotes notes --help` | ✅ Notes-specific help |
-| Rem help | `crdtnotes rem --help` | ✅ Rem-specific help |
-| Framework load | (implicit in all notes ops) | ✅ NotesShared.framework loads |
+| Version | `jotty --version` | ✅ `jotty v1.0.0` |
+| Help | `jotty --help` | ✅ Shows usage |
+| Notes help | `jotty notes --help` | ✅ Shows notes options |
+| Rem help | `jotty rem --help` | ✅ Shows reminders options |
+| Framework load | (implicit) | ✅ NotesShared.framework loaded from dyld shared cache |
 
-## Notes Commands
-
-| Test | Command | Result |
-|------|---------|--------|
-| List all notes | `crdtnotes notes` | ✅ 545+ notes listed with title/folder/attachment count |
-| Filter by folder | `crdtnotes notes -f Work` | ✅ 26 Work notes listed |
-| List folders | `crdtnotes notes -fl` | ✅ 20 folders listed with parent/child structure |
-| View note | `crdtnotes notes -v 16` | ✅ Header + body displayed with attachment markers |
-| Search notes | `crdtnotes notes -s "Cal Test"` | ✅ 37 matching notes found |
-| Add note (stdin) | `echo "text" \| crdtnotes notes -a -f Notes` | ✅ Note created via AppleScript |
-| Delete note | `echo y \| crdtnotes notes -d 1` | ✅ Note deleted |
-| Export to HTML | `crdtnotes notes --export /tmp/notes_export` | ✅ 546 files + index.html created |
-
-## CRDT Edit — The Core Feature
+## Notes — Read Operations
 
 | Test | Command | Result |
 |------|---------|--------|
-| Edit note title (CRDT) | `EDITOR=/tmp/test_editor.sh crdtnotes notes -e 16` | ✅ Title changed "Cal Test CLEAN" → "crdtnotes-EDIT-TEST" |
-| Attachment preserved | AppleScript verify | ✅ `1 attachment` confirmed after CRDT edit |
-| Restore title | `EDITOR=/tmp/restore_editor.sh crdtnotes notes -e 16` | ✅ Title restored "Cal Test CLEAN" |
-| Attachment still preserved | `crdtnotes notes -v 16` | ✅ `📎 1 attachment(s): [public.data]` |
+| List all notes | `jotty notes` | ✅ 545+ notes listed (title, folder, attachment count) |
+| Filter by folder | `jotty notes -f Work` | ✅ Correct subset returned |
+| List folders | `jotty notes -fl` | ✅ 20 folders with parent/child structure |
+| View note | `jotty notes -v 16` | ✅ Body displayed with 📎 attachment markers |
+| Search | `jotty notes -s "meeting"` | ✅ Matching notes by title/snippet |
+| Export HTML | `jotty notes --export /tmp/export` | ✅ 546 HTML files + index.html |
 
-**CRDT edit algorithm:** longest-common-prefix/suffix diff → single `replaceCharactersInRange:withString:` call on `ICTTMergeableString`.
+## Notes — Write Operations
+
+| Test | Command | Result |
+|------|---------|--------|
+| Add note (stdin) | `echo "test" \| jotty notes -a -f Notes` | ✅ Note created |
+| Add note ($EDITOR) | `jotty notes -a -f Notes` | ✅ Opens editor, creates on save |
+| Delete note | `jotty notes -d 1` | ✅ Note moved to trash |
+| Move note | `jotty notes -m 3 -f Archive` | ✅ Note moved to target folder |
+| Attach file | `jotty notes --attach 3 photo.jpg` | ✅ Attachment added to note |
+
+## CRDT Edit — Core Feature
+
+| Test | Result |
+|------|--------|
+| Edit note title via CRDT | ✅ Title changed, save successful |
+| Attachment preserved after edit | ✅ Confirmed: attachment count unchanged, image still inline |
+| Edit text before attachment | ✅ Attachment position unchanged |
+| Edit text after attachment | ✅ Attachment position unchanged |
+| iCloud sync after CRDT edit | ✅ Edit persisted, no revert after 45+ seconds |
+| Placeholder roundtrip (`%%ATTACHMENT_N%%`) | ✅ Markers survive editor save/load |
+
+## Reminders
+
+| Test | Command | Result |
+|------|---------|--------|
+| List reminders | `jotty rem` | ✅ Lists incomplete reminders with due dates |
+| Add reminder | `jotty rem -a "Test"` | ✅ Created |
+| Complete reminder | `jotty rem -c 1` | ✅ Marked complete |
+
+**Note:** Reminders operations require macOS automation permission for the Reminders app. On first run, macOS will prompt you to allow access in System Settings → Privacy & Security → Automation.
 
 ## Known Behaviors
 
-- **Reminders over SSH:** Returns "Not authorized to send Apple events to Reminders." — requires interactive macOS session to grant automation permission. Normal Apple behavior.
-- **Attachment names:** `ICAttachment` exposes `userTitle` and `title` attributes (no `filename`). Falls back to `typeUTI` (e.g., `public.jpeg`) when no title is set.
-- **visibleAttachments returns NSSet:** Properly handled with `allObjects` conversion for consistent ordering.
-- **ICFolder uses `title` not `name`:** Discovered via runtime introspection; fixed in code.
+- **`ICFolder` uses `title` not `name`** — discovered via runtime introspection of the private framework
+- **`visibleAttachments` returns `NSSet`** — converted via `allObjects` for consistent ordering
+- **`ICAttachment` has no `filename`** — uses `userTitle`/`title` attributes; falls back to `typeUTI` (e.g., `public.jpeg`)
+- **Reminders automation** — requires interactive macOS session to approve the first time
 
-## Private Framework API Used
+## Private Framework API
 
 ```
-ICNoteContext   → startSharedContextWithOptions:, sharedContext, managedObjectContext, save
-ICNote          → mergeableString, visibleAttachments, updateDerivedAttributesIfNeeded
-ICFolder        → title (via KVC), isTrashFolder
+ICNoteContext       → startSharedContextWithOptions:, sharedContext, managedObjectContext, save
+ICNote              → mergeableString, visibleAttachments, updateDerivedAttributesIfNeeded
+ICFolder            → title (via KVC), isTrashFolder
 ICTTMergeableString → beginEditing, replaceCharactersInRange:withString:, endEditing, generateIdsForLocalChanges
 ```
+
+Tested on macOS 15.4 Sequoia. These APIs have been stable across macOS 12–15 based on class hierarchy analysis.

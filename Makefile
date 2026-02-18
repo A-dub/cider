@@ -2,8 +2,8 @@ CC     = clang
 CFLAGS = -framework Foundation -framework CoreData \
          -Wall -Wno-deprecated-declarations \
          -fobjc-arc
-TARGET = crdtnotes
-SRC    = crdtnotes.m
+TARGET = jotty
+SRC    = jotty.m
 
 .PHONY: all clean install
 
@@ -23,4 +23,4 @@ clean:
 # macOS specific: compile on remote mac and scp back
 mac-build:
 	scp -P 23 $(SRC) ad@99.99.29.248:/tmp/
-	ssh -p 23 ad@99.99.29.248 'cd /tmp && clang -framework Foundation -framework CoreData -o crdtnotes crdtnotes.m && echo "Build OK"'
+	ssh -p 23 ad@99.99.29.248 'cd /tmp && clang -framework Foundation -framework CoreData -o jotty jotty.m && echo "Build OK"'
