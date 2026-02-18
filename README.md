@@ -44,68 +44,106 @@ cp cider /usr/local/bin/
 ### Notes
 
 ```bash
-# List all notes
+# List all notes (default when no subcommand)
 cider notes
+cider notes list
 
 # Filter by folder
-cider notes -f "Work"
+cider notes list -f "Work"
+cider notes list --folder Work
 
 # List all folders
-cider notes -fl
+cider notes folders
 
 # View note #3 (shows attachment positions)
-cider notes -v 3
+cider notes 3
+cider notes show 3
+
+# JSON output (pipe-friendly)
+cider notes list --json
+cider notes show 3 --json
+cider notes folders --json
+cider notes search "meeting" --json
 
 # Add a new note (opens $EDITOR)
-cider notes -a -f "Personal"
+cider notes add --folder Personal
 
 # Add from stdin
-echo "Quick thought" | cider notes -a -f "Notes"
+echo "Quick thought" | cider notes add --folder Notes
 
 # Edit note #3 — attachments stay in place! ✨
-cider notes -e 3
+cider notes edit 3
+
+# Edit from stdin (no editor needed)
+echo "new content" | cider notes edit 3
+
+# Find & replace in note #3 (fully scriptable, no editor)
+cider notes replace 3 --find "old text" --replace "new text"
 
 # Delete note #3
-cider notes -d 3
+cider notes delete 3
 
 # Move note #3 to Archive
-cider notes -m 3 -f "Archive"
+cider notes move 3 Archive
+cider notes move 3 --folder Archive
 
 # Search notes
-cider notes -s "meeting"
+cider notes search "meeting"
 
 # Export all notes to HTML
-cider notes --export ~/Desktop/notes-backup
+cider notes export ~/Desktop/notes-backup
 
 # Attach a file to note #3
-cider notes --attach 3 ~/Photos/vacation.jpg
+cider notes attach 3 ~/Photos/vacation.jpg
+
+# Interactive mode: omit N to get prompted (when stdin is a terminal)
+cider notes edit       # shows list, prompts "Enter note number to edit: "
+cider notes delete     # same for delete, show, move, replace, attach
+```
+
+#### Backwards compatibility
+
+Old flag syntax still works:
+
+```bash
+cider notes -fl          # → cider notes folders
+cider notes -v 3         # → cider notes show 3
+cider notes -e 3         # → cider notes edit 3
+cider notes -d 3         # → cider notes delete 3
+cider notes -s "query"   # → cider notes search "query"
+cider notes -f Work      # → cider notes list --folder Work
+cider notes -a -f Work   # → cider notes add --folder Work
+cider notes -m 3 -f Arc  # → cider notes move 3 Archive
+cider notes --export ~/Desktop/export  # still works
+cider notes --attach 3 file.jpg        # still works
 ```
 
 ### Reminders
 
 ```bash
-# List incomplete reminders
+# List incomplete reminders (default)
 cider rem
+cider rem list
 
 # Add a reminder
-cider rem -a "Buy groceries"
+cider rem add "Buy groceries"
 
 # Add with due date
-cider rem -a "Doctor" "March 15, 2026 9:00 AM"
+cider rem add "Doctor" "March 15, 2026 9:00 AM"
 
 # Edit reminder #2
-cider rem -e 2 "Updated title"
+cider rem edit 2 "Updated title"
 
 # Complete reminder #1
-cider rem -c 1
+cider rem complete 1
 
 # Delete reminder #2
-cider rem -d 2
+cider rem delete 2
 ```
 
 ## How Editing Works
 
-When you run `cider notes -e 3`:
+When you run `cider notes edit 3`:
 
 1. Cider reads the note's CRDT string from the Notes database
 2. Attachment markers (`U+FFFC`) become visible placeholders:
@@ -121,11 +159,23 @@ When you run `cider notes -e 3`:
 5. On save, Cider computes the minimal diff and applies it via the CRDT API
 6. Attachments remain in their original position. iCloud syncs normally.
 
+**Pipe mode:** When stdin is not a terminal, the new content is read from stdin directly — no editor opens. The `%%ATTACHMENT_N_name%%` placeholders still work if you include them.
+
+```bash
+echo "new content" | cider notes edit 3
+```
+
+**Replace command:** For scripting, `replace` lets you do surgical find-and-replace without an editor:
+
+```bash
+cider notes replace 3 --find "old text" --replace "new text"
+```
+
 ## Architecture
 
 | Component | How |
 |-----------|-----|
-| **Edit** | `ICTTMergeableString` CRDT API (preserves attachments) |
+| **Edit / Replace** | `ICTTMergeableString` CRDT API (preserves attachments) |
 | **List / View / Search** | Core Data fetch via `ICNoteContext` (fast, no AppleScript) |
 | **Add / Delete / Move** | `NSAppleScript` (reliable, handles iCloud sync) |
 | **Attach** | `NSAppleScript` (`make new attachment`) |
@@ -156,12 +206,15 @@ See [Reverse Engineering Notes](https://github.com/A-dub/cider/wiki) for the ful
 | View notes | ✅ (Markdown) | ✅ (plain text + attachment markers) |
 | Add notes | ✅ | ✅ |
 | **Edit notes** | ⚠️ **destroys attachments** | ✅ **CRDT-safe** |
+| **Replace text** | ❌ | ✅ (scriptable, no editor) |
 | Delete notes | ✅ | ✅ |
 | Move notes | ⚠️ recreates note | ✅ native move |
 | Search | ✅ (fzf) | ✅ (Core Data) |
 | Export | ✅ HTML+MD | ✅ HTML |
 | **Attach files** | ❌ | ✅ |
 | **Preserve images on edit** | ❌ | ✅ |
+| **JSON output** | ❌ | ✅ (`--json` flag) |
+| **Pipe-friendly** | ❌ | ✅ (stdin edit, JSON out) |
 | Dependencies | Python, Click, mistune, html2text | **None** |
 | Language | Python | Objective-C |
 | Speed | Slow (AppleScript for everything) | Fast (Core Data for reads) |

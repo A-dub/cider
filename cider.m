@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "1.0.0"
+#define VERSION "1.1.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +94,6 @@ NSArray *fetchAllNotes(void) {
 
 NSArray *fetchFolders(void) {
     NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
-    // ICFolder uses 'title' not 'name'
     req.sortDescriptors = @[
         [NSSortDescriptor sortDescriptorWithKey:@"title" ascending:YES]
     ];
@@ -131,12 +130,10 @@ NSString *noteTitle(id note) {
 }
 
 NSString *folderName(id note) {
-    // ICFolder uses 'title' attribute, not 'name'
     id folder = [note valueForKey:@"folder"];
     if (!folder) return @"Notes";
     id title = [folder valueForKey:@"title"];
     if (title && [title isKindOfClass:[NSString class]]) return (NSString *)title;
-    // Fallback: try the localizedTitle method
     id locTitle = ((id (*)(id, SEL))objc_msgSend)(
         folder, NSSelectorFromString(@"localizedTitle"));
     return (locTitle && [locTitle isKindOfClass:[NSString class]])
@@ -153,12 +150,9 @@ NSUInteger noteAttachmentCount(id note) {
     return atts ? [atts count] : 0;
 }
 
-// Convert the result of visibleAttachments (an NSSet or NSOrderedSet)
-// to a sorted NSArray for stable ordering.
 NSArray *attachmentsAsArray(id attsObj) {
     if (!attsObj) return @[];
     if ([attsObj isKindOfClass:[NSArray class]]) return (NSArray *)attsObj;
-    // NSSet or NSOrderedSet
     if ([attsObj respondsToSelector:@selector(allObjects)]) {
         return [(NSSet *)attsObj allObjects];
     }
@@ -175,7 +169,6 @@ NSArray *noteAttachmentNames(id note) {
 
     NSMutableArray *names = [NSMutableArray array];
     for (id att in atts) {
-        // ICAttachment has 'title' and 'userTitle' attributes (no 'filename')
         NSString *name = nil;
         id ut = [att valueForKey:@"userTitle"];
         if (ut && [ut isKindOfClass:[NSString class]] && [(NSString *)ut length] > 0) {
@@ -187,7 +180,6 @@ NSArray *noteAttachmentNames(id note) {
             }
         }
         if (!name || name.length == 0) {
-            // Try typeUTI for a hint
             id uti = [att valueForKey:@"typeUTI"];
             if (uti && [uti isKindOfClass:[NSString class]]) {
                 name = [NSString stringWithFormat:@"[%@]", uti];
@@ -209,7 +201,6 @@ id noteMergeableString(id note) {
         note, NSSelectorFromString(@"mergeableString"));
 }
 
-// Returns the raw NSString with U+FFFC where attachments are
 NSString *noteRawText(id note) {
     id mergeStr = noteMergeableString(note);
     if (!mergeStr) return @"";
@@ -224,7 +215,6 @@ NSString *noteRawText(id note) {
     return (NSString *)attrStr ?: @"";
 }
 
-// Replace U+FFFC with [📎 filename] for display
 NSString *noteTextForDisplay(id note) {
     NSString *raw = noteRawText(note);
     NSArray *names = noteAttachmentNames(note);
@@ -244,7 +234,6 @@ NSString *noteTextForDisplay(id note) {
     return buf;
 }
 
-// Replace U+FFFC with %%ATTACHMENT_N%% markers for the editor
 NSString *rawTextToEditable(NSString *raw, NSArray *names) {
     NSMutableString *buf = [NSMutableString stringWithCapacity:[raw length]];
     NSUInteger ai = 0;
@@ -263,7 +252,6 @@ NSString *rawTextToEditable(NSString *raw, NSArray *names) {
     return buf;
 }
 
-// Replace %%ATTACHMENT_N_name%% markers back to U+FFFC
 NSString *editableToRawText(NSString *edited) {
     NSMutableString *result = [NSMutableString stringWithString:edited];
     NSRegularExpression *regex = [NSRegularExpression
@@ -273,7 +261,6 @@ NSString *editableToRawText(NSString *edited) {
     NSArray *matches = [regex matchesInString:result
                                       options:0
                                         range:NSMakeRange(0, [result length])];
-    // Process right-to-left to preserve positions
     for (NSInteger i = (NSInteger)matches.count - 1; i >= 0; i--) {
         NSTextCheckingResult *match = matches[(NSUInteger)i];
         [result replaceCharactersInRange:match.range
@@ -282,12 +269,10 @@ NSString *editableToRawText(NSString *edited) {
     return result;
 }
 
-// Save context
 BOOL saveContext(void) {
     NSError *err = nil;
     BOOL ok = ((BOOL (*)(id, SEL, NSError **))objc_msgSend)(
         g_ctx, NSSelectorFromString(@"save:"), &err);
-    // Fallback: try save without error param
     if (!ok && !err) {
         ok = ((BOOL (*)(id, SEL))objc_msgSend)(
             g_ctx, NSSelectorFromString(@"save"));
@@ -301,8 +286,6 @@ BOOL saveContext(void) {
 
 /**
  * Apply a CRDT edit to a note, preserving attachment positions.
- * Uses longest-common-prefix/suffix diff to find the minimal changed region,
- * then calls replaceCharactersInRange:withString: on the mergeableString.
  */
 BOOL applyCRDTEdit(id note, NSString *oldText, NSString *newText) {
     if ([oldText isEqualToString:newText]) {
@@ -319,7 +302,6 @@ BOOL applyCRDTEdit(id note, NSString *oldText, NSString *newText) {
     NSUInteger oldLen = [oldText length];
     NSUInteger newLen = [newText length];
 
-    // Find longest common prefix
     NSUInteger prefix = 0;
     while (prefix < oldLen && prefix < newLen &&
            [oldText characterAtIndex:prefix] ==
@@ -327,7 +309,6 @@ BOOL applyCRDTEdit(id note, NSString *oldText, NSString *newText) {
         prefix++;
     }
 
-    // Find longest common suffix (not overlapping with prefix)
     NSUInteger suffix = 0;
     while (suffix < (oldLen - prefix) && suffix < (newLen - prefix) &&
            [oldText characterAtIndex:oldLen - 1 - suffix] ==
@@ -364,15 +345,12 @@ BOOL applyCRDTEdit(id note, NSString *oldText, NSString *newText) {
 // Note listing helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Returns a filtered list of notes (optionally by folder name), skipping
-// system/trash/hidden folders unless the user explicitly asks for them.
 NSArray *filteredNotes(NSString *filterFolder) {
     NSArray *all = fetchAllNotes();
     if (!all) return @[];
 
     NSMutableArray *result = [NSMutableArray array];
     for (id note in all) {
-        // Skip notes in trash / recently deleted
         id folder = [note valueForKey:@"folder"];
         if (folder) {
             BOOL isTrash = ((BOOL (*)(id, SEL))objc_msgSend)(
@@ -392,11 +370,57 @@ NSArray *filteredNotes(NSString *filterFolder) {
     return result;
 }
 
-// Get note by 1-based index from the (optionally filtered) list
 id noteAtIndex(NSUInteger idx, NSString *folder) {
     NSArray *notes = filteredNotes(folder);
     if (idx == 0 || idx > notes.count) return nil;
     return notes[idx - 1];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Simple JSON string escaping
+NSString *jsonEscapeString(NSString *s) {
+    if (!s) return @"";
+    NSMutableString *r = [NSMutableString stringWithString:s];
+    [r replaceOccurrencesOfString:@"\\" withString:@"\\\\" options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\"" withString:@"\\\"" options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\n" withString:@"\\n"  options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\r" withString:@"\\r"  options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\t" withString:@"\\t"  options:0 range:NSMakeRange(0, r.length)];
+    return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive prompt helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Forward declaration (cmdNotesList is defined below)
+void cmdNotesList(NSString *folder, BOOL jsonOutput);
+
+// Prompt user for a note index when none was supplied.
+// Shows the note list, then reads a number from stdin.
+// Returns 0 on failure/cancel.
+NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr, "Error: note number required (stdin is not a tty)\n");
+        return 0;
+    }
+
+    cmdNotesList(folder, NO);
+
+    printf("\nEnter note number to %s: ", verb ? [verb UTF8String] : "select");
+    fflush(stdout);
+
+    char buf[32] = {0};
+    if (fgets(buf, sizeof(buf), stdin) == NULL) return 0;
+    int n = atoi(buf);
+    if (n <= 0) {
+        printf("Cancelled.\n");
+        return 0;
+    }
+    return (NSUInteger)n;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,8 +459,26 @@ NSString *padRight(NSString *s, NSUInteger width) {
 // COMMANDS: notes
 // ─────────────────────────────────────────────────────────────────────────────
 
-void cmdNotesList(NSString *folder) {
+void cmdNotesList(NSString *folder, BOOL jsonOutput) {
     NSArray *notes = filteredNotes(folder);
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < notes.count; i++) {
+            id note = notes[i];
+            NSString *t = jsonEscapeString(noteTitle(note));
+            NSString *f = jsonEscapeString(folderName(note));
+            NSUInteger ac = noteAttachmentCount(note);
+            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\",\"attachments\":%lu}%s\n",
+                   (unsigned long)(i + 1),
+                   [t UTF8String],
+                   [f UTF8String],
+                   (unsigned long)ac,
+                   (i + 1 < notes.count) ? "," : "");
+        }
+        printf("]\n");
+        return;
+    }
 
     printf("  # %-42s %-22s %s\n",
            "Title", "Folder", "Attachments");
@@ -471,15 +513,37 @@ void cmdNotesList(NSString *folder) {
     printf("\nTotal: %lu note(s)\n", (unsigned long)notes.count);
 }
 
-void cmdFoldersList(void) {
+void cmdFoldersList(BOOL jsonOutput) {
     NSArray *folders = fetchFolders();
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < folders.count; i++) {
+            id folder = folders[i];
+            id titleVal = [folder valueForKey:@"title"];
+            NSString *name = (titleVal && [titleVal isKindOfClass:[NSString class]])
+                ? (NSString *)titleVal : @"(unnamed)";
+            id parent = [folder valueForKey:@"parent"];
+            NSString *parentName = @"";
+            if (parent) {
+                id pTitleVal = [parent valueForKey:@"title"];
+                if (pTitleVal && [pTitleVal isKindOfClass:[NSString class]])
+                    parentName = (NSString *)pTitleVal;
+            }
+            printf("  {\"name\":\"%s\",\"parent\":\"%s\"}%s\n",
+                   [jsonEscapeString(name) UTF8String],
+                   [jsonEscapeString(parentName) UTF8String],
+                   (i + 1 < folders.count) ? "," : "");
+        }
+        printf("]\n");
+        return;
+    }
+
     printf("Folders:\n");
     for (id folder in folders) {
-        // ICFolder uses 'title' attribute
         id titleVal = [folder valueForKey:@"title"];
         NSString *name = (titleVal && [titleVal isKindOfClass:[NSString class]])
             ? (NSString *)titleVal : @"(unnamed)";
-        // parent relationship is 'parent' on ICFolder
         id parent = [folder valueForKey:@"parent"];
         if (parent) {
             id pTitleVal = [parent valueForKey:@"title"];
@@ -493,7 +557,7 @@ void cmdFoldersList(void) {
     printf("\nTotal: %lu folder(s)\n", (unsigned long)folders.count);
 }
 
-void cmdNotesView(NSUInteger idx, NSString *folder) {
+void cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
     id note = noteAtIndex(idx, folder);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
@@ -504,8 +568,27 @@ void cmdNotesView(NSUInteger idx, NSString *folder) {
     NSString *f = folderName(note);
     NSArray *names = noteAttachmentNames(note);
     NSUInteger ac = names.count;
+    NSString *body = noteTextForDisplay(note);
 
-    // Header
+    if (jsonOutput) {
+        NSMutableString *jsonNames = [NSMutableString stringWithString:@"["];
+        for (NSUInteger i = 0; i < names.count; i++) {
+            [jsonNames appendFormat:@"\"%@\"%@",
+             jsonEscapeString(names[i]),
+             (i + 1 < names.count) ? @"," : @""];
+        }
+        [jsonNames appendString:@"]"];
+        printf("{\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\","
+               "\"attachments\":%lu,\"attachment_names\":%s,\"body\":\"%s\"}\n",
+               (unsigned long)idx,
+               [jsonEscapeString(t) UTF8String],
+               [jsonEscapeString(f) UTF8String],
+               (unsigned long)ac,
+               [jsonNames UTF8String],
+               [jsonEscapeString(body) UTF8String]);
+        return;
+    }
+
     printf("╔══════════════════════════════════════════╗\n");
     printf("  %s\n", [t UTF8String]);
     printf("  Folder: %s", [f UTF8String]);
@@ -515,24 +598,19 @@ void cmdNotesView(NSUInteger idx, NSString *folder) {
     }
     printf("\n╚══════════════════════════════════════════╝\n\n");
 
-    printf("%s\n", [noteTextForDisplay(note) UTF8String]);
+    printf("%s\n", [body UTF8String]);
 }
 
 void cmdNotesAdd(NSString *folder) {
     NSString *content = nil;
 
-    // Detect if stdin is a pipe/file
-    struct stat st;
-    fstat(STDIN_FILENO, &st);
-    BOOL hasPipe = S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode);
-
-    if (hasPipe) {
+    if (!isatty(STDIN_FILENO)) {
         NSData *data = [[NSFileHandle fileHandleWithStandardInput]
                         readDataToEndOfFile];
         content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     } else {
         NSString *tmp = [NSTemporaryDirectory()
-                         stringByAppendingPathComponent:@"jot_new.txt"];
+                         stringByAppendingPathComponent:@"cider_new.txt"];
         [@"" writeToFile:tmp atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
         NSString *editor = [[[NSProcessInfo processInfo] environment]
@@ -552,7 +630,6 @@ void cmdNotesAdd(NSString *folder) {
         return;
     }
 
-    // Escape for AppleScript
     NSString *esc = [content stringByReplacingOccurrencesOfString:@"\\"
                                                        withString:@"\\\\"];
     esc = [esc stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
@@ -600,55 +677,67 @@ void cmdNotesEdit(NSUInteger idx) {
     NSString *rawText = noteRawText(note);
     NSString *editText = rawTextToEditable(rawText, names);
 
-    printf("Editing: \"%s\"\n", [t UTF8String]);
-    if (names.count > 0) {
-        printf("⚠️  Note has %lu attachment(s). Do NOT remove or rename the "
-               "%%%%ATTACHMENT_N_...%%%% markers.\n",
-               (unsigned long)names.count);
-        for (NSUInteger i = 0; i < names.count; i++) {
-            printf("   [%lu] %s\n", (unsigned long)i, [names[i] UTF8String]);
+    NSString *newRaw = nil;
+
+    // If stdin is not a tty, read content from stdin (pipe mode)
+    if (!isatty(STDIN_FILENO)) {
+        NSData *data = [[NSFileHandle fileHandleWithStandardInput]
+                        readDataToEndOfFile];
+        NSString *piped = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if (!piped || [[piped stringByTrimmingCharactersInSet:
+                        [NSCharacterSet whitespaceAndNewlineCharacterSet]] length] == 0) {
+            printf("Aborted: empty input.\n");
+            return;
         }
-    }
+        // Piped content replaces note body; attachment markers are restored if present
+        newRaw = editableToRawText(piped);
+    } else {
+        printf("Editing: \"%s\"\n", [t UTF8String]);
+        if (names.count > 0) {
+            printf("⚠️  Note has %lu attachment(s). Do NOT remove or rename the "
+                   "%%%%ATTACHMENT_N_...%%%% markers.\n",
+                   (unsigned long)names.count);
+            for (NSUInteger i = 0; i < names.count; i++) {
+                printf("   [%lu] %s\n", (unsigned long)i, [names[i] UTF8String]);
+            }
+        }
 
-    // Write to temp file
-    NSString *tmp = [NSTemporaryDirectory()
-                     stringByAppendingPathComponent:@"jot_edit.txt"];
-    NSError *writeErr = nil;
-    [editText writeToFile:tmp
-               atomically:YES
-                 encoding:NSUTF8StringEncoding
-                    error:&writeErr];
-    if (writeErr) {
-        fprintf(stderr, "Error writing temp file: %s\n",
-                [[writeErr localizedDescription] UTF8String]);
-        return;
-    }
+        NSString *tmp = [NSTemporaryDirectory()
+                         stringByAppendingPathComponent:@"cider_edit.txt"];
+        NSError *writeErr = nil;
+        [editText writeToFile:tmp
+                   atomically:YES
+                     encoding:NSUTF8StringEncoding
+                        error:&writeErr];
+        if (writeErr) {
+            fprintf(stderr, "Error writing temp file: %s\n",
+                    [[writeErr localizedDescription] UTF8String]);
+            return;
+        }
 
-    // Open editor
-    NSString *editor = [[[NSProcessInfo processInfo] environment]
-                        objectForKey:@"EDITOR"] ?: @"vi";
-    int ret = system([[NSString stringWithFormat:@"%@ %@", editor, tmp] UTF8String]);
-    if (ret != 0) {
-        fprintf(stderr, "Editor returned error (%d)\n", ret);
+        NSString *editor = [[[NSProcessInfo processInfo] environment]
+                            objectForKey:@"EDITOR"] ?: @"vi";
+        int ret = system([[NSString stringWithFormat:@"%@ %@", editor, tmp] UTF8String]);
+        if (ret != 0) {
+            fprintf(stderr, "Editor returned error (%d)\n", ret);
+            [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+            return;
+        }
+
+        NSError *readErr = nil;
+        NSString *edited = [NSString stringWithContentsOfFile:tmp
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:&readErr];
         [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-        return;
+
+        if (!edited) {
+            fprintf(stderr, "Error reading temp file: %s\n",
+                    [[readErr localizedDescription] UTF8String]);
+            return;
+        }
+
+        newRaw = editableToRawText(edited);
     }
-
-    // Read edited content
-    NSError *readErr = nil;
-    NSString *edited = [NSString stringWithContentsOfFile:tmp
-                                                 encoding:NSUTF8StringEncoding
-                                                    error:&readErr];
-    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-
-    if (!edited) {
-        fprintf(stderr, "Error reading temp file: %s\n",
-                [[readErr localizedDescription] UTF8String]);
-        return;
-    }
-
-    // Restore attachment markers
-    NSString *newRaw = editableToRawText(edited);
 
     // Validate: same number of attachment markers
     NSUInteger origCount = 0, newCount = 0;
@@ -664,11 +753,38 @@ void cmdNotesEdit(NSUInteger idx) {
                 (unsigned long)origCount, (unsigned long)newCount);
     }
 
-    // Apply CRDT edit
     if (!applyCRDTEdit(note, rawText, newRaw)) return;
 
     if (saveContext()) {
         printf("✓ Note saved (CRDT, attachments preserved).\n");
+    } else {
+        fprintf(stderr, "Error: save failed\n");
+    }
+}
+
+void cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *rawText = noteRawText(note);
+    NSRange found = [rawText rangeOfString:findStr];
+    if (found.location == NSNotFound) {
+        fprintf(stderr, "Error: Text not found in note %lu: \"%s\"\n",
+                (unsigned long)idx, [findStr UTF8String]);
+        return;
+    }
+
+    NSString *newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
+                                                          withString:replaceStr];
+
+    if (!applyCRDTEdit(note, rawText, newRaw)) return;
+
+    if (saveContext()) {
+        printf("✓ Replaced \"%s\" → \"%s\" in note %lu.\n",
+               [findStr UTF8String], [replaceStr UTF8String], (unsigned long)idx);
     } else {
         fprintf(stderr, "Error: save failed\n");
     }
@@ -739,15 +855,36 @@ void cmdNotesMove(NSUInteger idx, NSString *targetFolder) {
     }
 }
 
-void cmdNotesSearch(NSString *query) {
-    // Search by title and snippet (Core Data attributes on ICNote)
+void cmdNotesSearch(NSString *query, BOOL jsonOutput) {
     NSPredicate *pred = [NSPredicate predicateWithFormat:
         @"(title CONTAINS[cd] %@) OR (snippet CONTAINS[cd] %@)",
         query, query];
     NSArray *results = fetchNotes(pred);
 
     if (!results || results.count == 0) {
-        printf("No notes found matching \"%s\"\n", [query UTF8String]);
+        if (jsonOutput) {
+            printf("[]\n");
+        } else {
+            printf("No notes found matching \"%s\"\n", [query UTF8String]);
+        }
+        return;
+    }
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < results.count; i++) {
+            id note = results[i];
+            NSString *t = jsonEscapeString(noteTitle(note));
+            NSString *f = jsonEscapeString(folderName(note));
+            NSUInteger ac = noteAttachmentCount(note);
+            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\",\"attachments\":%lu}%s\n",
+                   (unsigned long)(i + 1),
+                   [t UTF8String],
+                   [f UTF8String],
+                   (unsigned long)ac,
+                   (i + 1 < results.count) ? "," : "");
+        }
+        printf("]\n");
         return;
     }
 
@@ -804,7 +941,6 @@ void cmdNotesExport(NSString *exportPath) {
         NSString *f = folderName(note);
         NSString *body = noteTextForDisplay(note);
 
-        // Sanitize filename
         NSMutableString *safeTitle = [NSMutableString stringWithString:t];
         NSCharacterSet *unsafe = [NSCharacterSet
             characterSetWithCharactersInString:@"/\\:*?\"<>|"];
@@ -816,7 +952,6 @@ void cmdNotesExport(NSString *exportPath) {
                               (unsigned long)i, safeTitle];
         NSString *filePath = [exportPath stringByAppendingPathComponent:filename];
 
-        // HTML escape helper
         NSString *(^htmlEsc)(NSString *) = ^NSString *(NSString *s) {
             s = [s stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
             s = [s stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
@@ -862,7 +997,6 @@ void cmdNotesAttach(NSUInteger idx, NSString *filePath) {
         return;
     }
 
-    // Resolve absolute path
     NSString *absPath = [filePath hasPrefix:@"/"]
         ? filePath
         : [[[NSFileManager defaultManager] currentDirectoryPath]
@@ -966,7 +1100,6 @@ void cmdRemAdd(NSString *title, NSString *dueDate) {
     }
 }
 
-// Helper: generate AppleScript to find reminder N and do an action
 NSString *remScriptFindAndAct(NSUInteger idx, NSString *action) {
     return [NSString stringWithFormat:
         @"tell application \"Reminders\"\n"
@@ -1045,72 +1178,117 @@ void printHelp(void) {
 "cider v" VERSION " — Apple Notes CLI with CRDT attachment support\n"
 "\n"
 "USAGE:\n"
-"  cider notes [options]    Notes operations\n"
-"  cider rem [options]      Reminders operations\n"
-"  cider --version          Show version\n"
-"  cider --help             Show this help\n"
+"  cider notes [subcommand]   Notes operations\n"
+"  cider rem [subcommand]     Reminders operations\n"
+"  cider --version            Show version\n"
+"  cider --help               Show this help\n"
 "\n"
-"NOTES OPTIONS:\n"
-"  (no args)                    List all notes\n"
-"  -f <folder>                  Filter by / set folder\n"
-"  -fl                          List all folders\n"
-"  -v <N>                       View note N\n"
-"  -a                           Add note (stdin or $EDITOR)\n"
-"  -a -f <folder>               Add note to folder\n"
-"  -e <N>                       Edit note N (CRDT — preserves attachments!)\n"
-"  -d <N>                       Delete note N\n"
-"  -m <N> -f <folder>           Move note N to folder\n"
-"  -s <query>                   Search notes by text\n"
-"  --export <path>              Export all notes to HTML\n"
-"  --attach <N> <file>          Add file attachment to note N\n"
+"NOTES SUBCOMMANDS:\n"
+"  list [-f <folder>] [--json]         List notes (default when no subcommand)\n"
+"  show <N> [--json]                   View note N  (also: cider notes <N>)\n"
+"  folders [--json]                    List all folders\n"
+"  add [--folder <f>]                  Add note (stdin or $EDITOR)\n"
+"  edit <N>                            Edit note N (CRDT — preserves attachments!)\n"
+"  delete <N>                          Delete note N\n"
+"  move <N> <folder>                   Move note N to folder\n"
+"  replace <N> --find <s> --replace <s>  Find & replace text in note N\n"
+"  search <query> [--json]             Search notes by text\n"
+"  export <path>                       Export all notes to HTML\n"
+"  attach <N> <file>                   Add file attachment to note N\n"
 "\n"
-"REMINDERS OPTIONS:\n"
-"  (no args)                    List all incomplete reminders\n"
-"  -a <title> [due-date]        Add reminder\n"
-"  -e <N> <new-title>           Edit reminder N\n"
-"  -d <N>                       Delete reminder N\n"
-"  -c <N>                       Complete reminder N\n"
+"REMINDERS SUBCOMMANDS:\n"
+"  list                               List incomplete reminders (default)\n"
+"  add <title> [due-date]             Add reminder\n"
+"  edit <N> <new-title>               Edit reminder N\n"
+"  delete <N>                         Delete reminder N\n"
+"  complete <N>                       Complete reminder N\n"
+"\n"
+"BACKWARDS COMPAT (old flags still work):\n"
+"  cider notes -fl             →  cider notes folders\n"
+"  cider notes -v N            →  cider notes show N\n"
+"  cider notes -e N            →  cider notes edit N\n"
+"  cider notes -d N            →  cider notes delete N\n"
+"  cider notes -s query        →  cider notes search query\n"
+"  cider notes --attach N file →  cider notes attach N file\n"
+"  cider notes --export path   →  cider notes export path\n"
 "\n"
 "CRDT EDIT:\n"
-"  The -e command opens the note in $EDITOR with %%ATTACHMENT_N_name%%\n"
+"  'edit' opens the note in $EDITOR with %%ATTACHMENT_N_name%%\n"
 "  markers where images/files are. Edit the text freely; do NOT remove\n"
-"  or rename the markers. On save, changes are applied via\n"
-"  ICTTMergeableString, so attachments stay in their original positions.\n"
+"  or rename the markers. Changes are applied via ICTTMergeableString.\n"
+"  Pipe content instead: echo 'new body' | cider notes edit N\n"
     );
 }
 
 void printNotesHelp(void) {
     printf(
-"cider notes — Apple Notes CLI\n"
+"cider notes v" VERSION " — Apple Notes CLI\n"
 "\n"
 "USAGE:\n"
-"  cider notes                     List all notes\n"
-"  cider notes -f <folder>         List notes in folder\n"
-"  cider notes -fl                 List all folders\n"
-"  cider notes -v <N>              View note N\n"
-"  cider notes -a                  Add note (reads stdin or $EDITOR)\n"
-"  cider notes -a -f <folder>      Add note to folder\n"
-"  cider notes -e <N>              Edit note N via CRDT (preserves attachments)\n"
-"  cider notes -d <N>              Delete note N\n"
-"  cider notes -m <N> -f <folder>  Move note N to folder\n"
-"  cider notes -s <query>          Search notes\n"
-"  cider notes --export <path>     Export notes to HTML\n"
-"  cider notes --attach <N> <file> Attach file to note N\n"
+"  cider notes                              List all notes\n"
+"  cider notes list [-f <folder>] [--json]  List notes (optionally filter by folder)\n"
+"  cider notes <N>                          View note N\n"
+"  cider notes show <N> [--json]            View note N\n"
+"  cider notes folders [--json]             List all folders\n"
+"  cider notes add [--folder <f>]           Add note (reads stdin or $EDITOR)\n"
+"  cider notes edit <N>                     Edit note N via CRDT (preserves attachments)\n"
+"                                           Pipe: echo 'content' | cider notes edit N\n"
+"  cider notes delete <N>                   Delete note N\n"
+"  cider notes move <N> <folder>            Move note N to folder\n"
+"  cider notes replace <N> --find <s> --replace <s>\n"
+"                                           Find & replace text in note N\n"
+"  cider notes search <query> [--json]      Search notes\n"
+"  cider notes export <path>                Export notes to HTML\n"
+"  cider notes attach <N> <file>            Attach file to note N\n"
+"\n"
+"OPTIONS:\n"
+"  --json    Output as JSON (for list, show, search, folders)\n"
+"  -f, --folder <name>   Filter by folder (for list) or set folder (for add)\n"
+"\n"
+"Interactive mode: if <N> is omitted from edit/delete/move/show/replace/attach,\n"
+"you'll be prompted to enter it (when stdin is a terminal).\n"
     );
 }
 
 void printRemHelp(void) {
     printf(
-"cider rem — Reminders CLI\n"
+"cider rem v" VERSION " — Reminders CLI\n"
 "\n"
 "USAGE:\n"
-"  cider rem                       List all incomplete reminders\n"
-"  cider rem -a <title>            Add reminder\n"
-"  cider rem -a <title> <due>      Add reminder with due date\n"
-"  cider rem -e <N> <new-title>    Edit reminder N\n"
-"  cider rem -d <N>                Delete reminder N\n"
-"  cider rem -c <N>                Complete reminder N\n"
+"  cider rem                          List all incomplete reminders\n"
+"  cider rem list                     List all incomplete reminders\n"
+"  cider rem add <title>              Add reminder\n"
+"  cider rem add <title> <due>        Add reminder with due date\n"
+"  cider rem edit <N> <new-title>     Edit reminder N\n"
+"  cider rem delete <N>               Delete reminder N\n"
+"  cider rem complete <N>             Complete reminder N\n"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Argument parsing helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Find a flag value in argv. Returns nil if not found.
+// Looks for --flag val or -f val patterns.
+NSString *argValue(int argc, char *argv[], int startIdx, const char *flag1, const char *flag2) {
+    for (int i = startIdx; i < argc - 1; i++) {
+        if ((flag1 && strcmp(argv[i], flag1) == 0) ||
+            (flag2 && strcmp(argv[i], flag2) == 0)) {
+            return [NSString stringWithUTF8String:argv[i + 1]];
+        }
+    }
+    return nil;
+}
+
+BOOL argHasFlag(int argc, char *argv[], int startIdx, const char *flag1, const char *flag2) {
+    for (int i = startIdx; i < argc; i++) {
+        if ((flag1 && strcmp(argv[i], flag1) == 0) ||
+            (flag2 && strcmp(argv[i], flag2) == 0)) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1145,38 +1323,179 @@ int main(int argc, char *argv[]) {
                 printNotesHelp();
                 return 0;
             }
-
-            // Init Core Data / NotesShared for all notes sub-commands
-            if (!initNotesContext()) return 1;
-
-            if (argc == 2) {
-                // cider notes
-                cmdNotesList(nil);
+            if (argc >= 3 && strcmp(argv[2], "-h") == 0) {
+                printNotesHelp();
                 return 0;
             }
 
-            NSString *opt = [NSString stringWithUTF8String:argv[2]];
+            if (!initNotesContext()) return 1;
 
-            if ([opt isEqualToString:@"-fl"]) {
-                cmdFoldersList();
+            // No subcommand: default to list
+            if (argc == 2) {
+                cmdNotesList(nil, NO);
+                return 0;
+            }
 
-            } else if ([opt isEqualToString:@"-f"]) {
+            NSString *sub = [NSString stringWithUTF8String:argv[2]];
+
+            // ── cider notes <N>  (bare number → show) ──
+            if ([sub intValue] > 0 && [sub isEqualToString:
+                [NSString stringWithFormat:@"%d", [sub intValue]]]) {
+                NSUInteger idx = (NSUInteger)[sub intValue];
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdNotesView(idx, nil, jsonOut);
+                return 0;
+            }
+
+            // ── cider notes list ──
+            if ([sub isEqualToString:@"list"]) {
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdNotesList(folder, jsonOut);
+
+            // ── cider notes show ──
+            } else if ([sub isEqualToString:@"show"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"show", nil);
+                if (!idx) return 1;
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdNotesView(idx, nil, jsonOut);
+
+            // ── cider notes folders ──
+            } else if ([sub isEqualToString:@"folders"]) {
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdFoldersList(jsonOut);
+
+            // ── cider notes add ──
+            } else if ([sub isEqualToString:@"add"]) {
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                cmdNotesAdd(folder);
+
+            // ── cider notes edit ──
+            } else if ([sub isEqualToString:@"edit"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"edit", nil);
+                if (!idx) return 1;
+                cmdNotesEdit(idx);
+
+            // ── cider notes delete ──
+            } else if ([sub isEqualToString:@"delete"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"delete", nil);
+                if (!idx) return 1;
+                cmdNotesDelete(idx);
+
+            // ── cider notes move ──
+            } else if ([sub isEqualToString:@"move"]) {
+                NSUInteger idx = 0;
+                NSString *targetFolder = nil;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"move", nil);
+                if (!idx) return 1;
+                // Target folder: cider notes move N <folder> or --folder <folder>
+                targetFolder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!targetFolder && argc >= 5) {
+                    // positional: cider notes move N FolderName
+                    const char *arg4 = argv[4];
+                    if (arg4[0] != '-') {
+                        targetFolder = [NSString stringWithUTF8String:arg4];
+                    }
+                }
+                if (!targetFolder) {
+                    fprintf(stderr, "Usage: cider notes move <N> <folder>\n");
+                    return 1;
+                }
+                cmdNotesMove(idx, targetFolder);
+
+            // ── cider notes replace ──
+            } else if ([sub isEqualToString:@"replace"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"replace", nil);
+                if (!idx) return 1;
+                NSString *findStr = argValue(argc, argv, 3, "--find", NULL);
+                NSString *replaceStr = argValue(argc, argv, 3, "--replace", NULL);
+                if (!findStr || !replaceStr) {
+                    fprintf(stderr, "Usage: cider notes replace <N> --find <text> --replace <text>\n");
+                    return 1;
+                }
+                cmdNotesReplace(idx, findStr, replaceStr);
+
+            // ── cider notes search ──
+            } else if ([sub isEqualToString:@"search"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider notes search <query>\n");
+                    return 1;
+                }
+                NSString *query = [NSString stringWithUTF8String:argv[3]];
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdNotesSearch(query, jsonOut);
+
+            // ── cider notes export ──
+            } else if ([sub isEqualToString:@"export"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider notes export <path>\n");
+                    return 1;
+                }
+                NSString *path = [NSString stringWithUTF8String:argv[3]];
+                cmdNotesExport(path);
+
+            // ── cider notes attach ──
+            } else if ([sub isEqualToString:@"attach"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"attach", nil);
+                if (!idx) return 1;
+                if (argc < 5) {
+                    fprintf(stderr, "Usage: cider notes attach <N> <file>\n");
+                    return 1;
+                }
+                NSString *filePath = [NSString stringWithUTF8String:argv[4]];
+                cmdNotesAttach(idx, filePath);
+
+            // ── Legacy flag aliases ──────────────────────────────────────────
+
+            } else if ([sub isEqualToString:@"-fl"]) {
+                cmdFoldersList(NO);
+
+            } else if ([sub isEqualToString:@"-f"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider notes -f <folder>\n");
                     return 1;
                 }
                 NSString *folder = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesList(folder);
+                cmdNotesList(folder, NO);
 
-            } else if ([opt isEqualToString:@"-v"]) {
+            } else if ([sub isEqualToString:@"-v"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider notes -v <N>\n");
                     return 1;
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
-                cmdNotesView(idx, nil);
+                cmdNotesView(idx, nil, NO);
 
-            } else if ([opt isEqualToString:@"-a"]) {
+            } else if ([sub isEqualToString:@"-a"]) {
                 NSString *folder = nil;
                 for (int i = 3; i < argc - 1; i++) {
                     if (strcmp(argv[i], "-f") == 0) {
@@ -1185,7 +1504,7 @@ int main(int argc, char *argv[]) {
                 }
                 cmdNotesAdd(folder);
 
-            } else if ([opt isEqualToString:@"-e"]) {
+            } else if ([sub isEqualToString:@"-e"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider notes -e <N>\n");
                     return 1;
@@ -1193,7 +1512,7 @@ int main(int argc, char *argv[]) {
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
                 cmdNotesEdit(idx);
 
-            } else if ([opt isEqualToString:@"-d"]) {
+            } else if ([sub isEqualToString:@"-d"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider notes -d <N>\n");
                     return 1;
@@ -1201,7 +1520,7 @@ int main(int argc, char *argv[]) {
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
                 cmdNotesDelete(idx);
 
-            } else if ([opt isEqualToString:@"-m"]) {
+            } else if ([sub isEqualToString:@"-m"]) {
                 if (argc < 6 || strcmp(argv[4], "-f") != 0) {
                     fprintf(stderr, "Usage: cider notes -m <N> -f <folder>\n");
                     return 1;
@@ -1210,15 +1529,15 @@ int main(int argc, char *argv[]) {
                 NSString *folder = [NSString stringWithUTF8String:argv[5]];
                 cmdNotesMove(idx, folder);
 
-            } else if ([opt isEqualToString:@"-s"]) {
+            } else if ([sub isEqualToString:@"-s"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider notes -s <query>\n");
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesSearch(query);
+                cmdNotesSearch(query, NO);
 
-            } else if ([opt isEqualToString:@"--export"]) {
+            } else if ([sub isEqualToString:@"--export"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider notes --export <path>\n");
                     return 1;
@@ -1226,7 +1545,7 @@ int main(int argc, char *argv[]) {
                 NSString *path = [NSString stringWithUTF8String:argv[3]];
                 cmdNotesExport(path);
 
-            } else if ([opt isEqualToString:@"--attach"]) {
+            } else if ([sub isEqualToString:@"--attach"]) {
                 if (argc < 5) {
                     fprintf(stderr, "Usage: cider notes --attach <N> <file>\n");
                     return 1;
@@ -1236,7 +1555,7 @@ int main(int argc, char *argv[]) {
                 cmdNotesAttach(idx, filePath);
 
             } else {
-                fprintf(stderr, "Unknown notes option: %s\n", argv[2]);
+                fprintf(stderr, "Unknown notes subcommand: %s\n", argv[2]);
                 printNotesHelp();
                 return 1;
             }
@@ -1245,7 +1564,8 @@ int main(int argc, char *argv[]) {
 
         // ── rem ──────────────────────────────────────────────────────────────
         if ([cmd isEqualToString:@"rem"]) {
-            if (argc >= 3 && strcmp(argv[2], "--help") == 0) {
+            if (argc >= 3 && (strcmp(argv[2], "--help") == 0 ||
+                               strcmp(argv[2], "-h") == 0)) {
                 printRemHelp();
                 return 0;
             }
@@ -1255,9 +1575,50 @@ int main(int argc, char *argv[]) {
                 return 0;
             }
 
-            NSString *opt = [NSString stringWithUTF8String:argv[2]];
+            NSString *sub = [NSString stringWithUTF8String:argv[2]];
 
-            if ([opt isEqualToString:@"-a"]) {
+            // ── Subcommand style ─────────────────────────────────────────────
+
+            if ([sub isEqualToString:@"list"]) {
+                cmdRemList();
+
+            } else if ([sub isEqualToString:@"add"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider rem add <title> [due-date]\n");
+                    return 1;
+                }
+                NSString *title = [NSString stringWithUTF8String:argv[3]];
+                NSString *due = (argc >= 5) ? [NSString stringWithUTF8String:argv[4]] : nil;
+                cmdRemAdd(title, due);
+
+            } else if ([sub isEqualToString:@"edit"]) {
+                if (argc < 5) {
+                    fprintf(stderr, "Usage: cider rem edit <N> <new-title>\n");
+                    return 1;
+                }
+                NSUInteger idx = (NSUInteger)atoi(argv[3]);
+                NSString *title = [NSString stringWithUTF8String:argv[4]];
+                cmdRemEdit(idx, title);
+
+            } else if ([sub isEqualToString:@"delete"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider rem delete <N>\n");
+                    return 1;
+                }
+                NSUInteger idx = (NSUInteger)atoi(argv[3]);
+                cmdRemDelete(idx);
+
+            } else if ([sub isEqualToString:@"complete"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider rem complete <N>\n");
+                    return 1;
+                }
+                NSUInteger idx = (NSUInteger)atoi(argv[3]);
+                cmdRemComplete(idx);
+
+            // ── Legacy flag aliases ──────────────────────────────────────────
+
+            } else if ([sub isEqualToString:@"-a"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider rem -a <title> [due-date]\n");
                     return 1;
@@ -1266,7 +1627,7 @@ int main(int argc, char *argv[]) {
                 NSString *due = (argc >= 5) ? [NSString stringWithUTF8String:argv[4]] : nil;
                 cmdRemAdd(title, due);
 
-            } else if ([opt isEqualToString:@"-e"]) {
+            } else if ([sub isEqualToString:@"-e"]) {
                 if (argc < 5) {
                     fprintf(stderr, "Usage: cider rem -e <N> <new-title>\n");
                     return 1;
@@ -1275,7 +1636,7 @@ int main(int argc, char *argv[]) {
                 NSString *title = [NSString stringWithUTF8String:argv[4]];
                 cmdRemEdit(idx, title);
 
-            } else if ([opt isEqualToString:@"-d"]) {
+            } else if ([sub isEqualToString:@"-d"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider rem -d <N>\n");
                     return 1;
@@ -1283,7 +1644,7 @@ int main(int argc, char *argv[]) {
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
                 cmdRemDelete(idx);
 
-            } else if ([opt isEqualToString:@"-c"]) {
+            } else if ([sub isEqualToString:@"-c"]) {
                 if (argc < 4) {
                     fprintf(stderr, "Usage: cider rem -c <N>\n");
                     return 1;
@@ -1292,7 +1653,7 @@ int main(int argc, char *argv[]) {
                 cmdRemComplete(idx);
 
             } else {
-                fprintf(stderr, "Unknown rem option: %s\n", argv[2]);
+                fprintf(stderr, "Unknown rem subcommand: %s\n", argv[2]);
                 printRemHelp();
                 return 1;
             }
