@@ -2,8 +2,8 @@ CC     = clang
 CFLAGS = -framework Foundation -framework CoreData \
          -Wall -Wno-deprecated-declarations \
          -fobjc-arc
-TARGET = jot
-SRC    = jot.m
+TARGET = cider
+SRC    = cider.m
 
 .PHONY: all clean install
 
@@ -23,4 +23,4 @@ clean:
 # macOS specific: compile on remote mac and scp back
 mac-build:
 	scp -P 23 $(SRC) ad@99.99.29.248:/tmp/
-	ssh -p 23 ad@99.99.29.248 'cd /tmp && clang -framework Foundation -framework CoreData -o jot jot.m && echo "Build OK"'
+	ssh -p 23 ad@99.99.29.248 'cd /tmp && clang -framework Foundation -framework CoreData -o cider cider.m && echo "Build OK"'

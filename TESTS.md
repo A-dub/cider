@@ -5,7 +5,7 @@ Tests run on macOS 15.4 (Sequoia), Apple M4.
 ## Build
 
 ```bash
-clang -framework Foundation -framework CoreData -o jot jot.m
+clang -framework Foundation -framework CoreData -o cider cider.m
 # → Compiles with no errors, no external dependencies
 ```
 
@@ -13,32 +13,32 @@ clang -framework Foundation -framework CoreData -o jot jot.m
 
 | Test | Command | Result |
 |------|---------|--------|
-| Version | `jot --version` | ✅ `jot v1.0.0` |
-| Help | `jot --help` | ✅ Shows usage |
-| Notes help | `jot notes --help` | ✅ Shows notes options |
-| Rem help | `jot rem --help` | ✅ Shows reminders options |
+| Version | `cider --version` | ✅ `cider v1.0.0` |
+| Help | `cider --help` | ✅ Shows usage |
+| Notes help | `cider notes --help` | ✅ Shows notes options |
+| Rem help | `cider rem --help` | ✅ Shows reminders options |
 | Framework load | (implicit) | ✅ NotesShared.framework loaded from dyld shared cache |
 
 ## Notes — Read Operations
 
 | Test | Command | Result |
 |------|---------|--------|
-| List all notes | `jot notes` | ✅ 545+ notes listed (title, folder, attachment count) |
-| Filter by folder | `jot notes -f Work` | ✅ Correct subset returned |
-| List folders | `jot notes -fl` | ✅ 20 folders with parent/child structure |
-| View note | `jot notes -v 16` | ✅ Body displayed with 📎 attachment markers |
-| Search | `jot notes -s "meeting"` | ✅ Matching notes by title/snippet |
-| Export HTML | `jot notes --export /tmp/export` | ✅ 546 HTML files + index.html |
+| List all notes | `cider notes` | ✅ 545+ notes listed (title, folder, attachment count) |
+| Filter by folder | `cider notes -f Work` | ✅ Correct subset returned |
+| List folders | `cider notes -fl` | ✅ 20 folders with parent/child structure |
+| View note | `cider notes -v 16` | ✅ Body displayed with 📎 attachment markers |
+| Search | `cider notes -s "meeting"` | ✅ Matching notes by title/snippet |
+| Export HTML | `cider notes --export /tmp/export` | ✅ 546 HTML files + index.html |
 
 ## Notes — Write Operations
 
 | Test | Command | Result |
 |------|---------|--------|
-| Add note (stdin) | `echo "test" \| jot notes -a -f Notes` | ✅ Note created |
-| Add note ($EDITOR) | `jot notes -a -f Notes` | ✅ Opens editor, creates on save |
-| Delete note | `jot notes -d 1` | ✅ Note moved to trash |
-| Move note | `jot notes -m 3 -f Archive` | ✅ Note moved to target folder |
-| Attach file | `jot notes --attach 3 photo.jpg` | ✅ Attachment added to note |
+| Add note (stdin) | `echo "test" \| cider notes -a -f Notes` | ✅ Note created |
+| Add note ($EDITOR) | `cider notes -a -f Notes` | ✅ Opens editor, creates on save |
+| Delete note | `cider notes -d 1` | ✅ Note moved to trash |
+| Move note | `cider notes -m 3 -f Archive` | ✅ Note moved to target folder |
+| Attach file | `cider notes --attach 3 photo.jpg` | ✅ Attachment added to note |
 
 ## CRDT Edit — Core Feature
 
@@ -55,9 +55,9 @@ clang -framework Foundation -framework CoreData -o jot jot.m
 
 | Test | Command | Result |
 |------|---------|--------|
-| List reminders | `jot rem` | ✅ Lists incomplete reminders with due dates |
-| Add reminder | `jot rem -a "Test"` | ✅ Created |
-| Complete reminder | `jot rem -c 1` | ✅ Marked complete |
+| List reminders | `cider rem` | ✅ Lists incomplete reminders with due dates |
+| Add reminder | `cider rem -a "Test"` | ✅ Created |
+| Complete reminder | `cider rem -c 1` | ✅ Marked complete |
 
 **Note:** Reminders operations require macOS automation permission for the Reminders app. On first run, macOS will prompt you to allow access in System Settings → Privacy & Security → Automation.
 
