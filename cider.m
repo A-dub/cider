@@ -561,11 +561,11 @@ void cmdFoldersList(BOOL jsonOutput) {
     printf("\nTotal: %lu folder(s)\n", (unsigned long)folders.count);
 }
 
-void cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
+int cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
     id note = noteAtIndex(idx, folder);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
-        return;
+        return 1;
     }
 
     NSString *t = noteTitle(note);
@@ -590,7 +590,7 @@ void cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
                (unsigned long)ac,
                [jsonNames UTF8String],
                [jsonEscapeString(body) UTF8String]);
-        return;
+        return 0;
     }
 
     printf("╔══════════════════════════════════════════╗\n");
@@ -603,6 +603,7 @@ void cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
     printf("\n╚══════════════════════════════════════════╝\n\n");
 
     printf("%s\n", [body UTF8String]);
+    return 0;
 }
 
 void cmdNotesAdd(NSString *folder) {
@@ -766,11 +767,11 @@ void cmdNotesEdit(NSUInteger idx) {
     }
 }
 
-void cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
+int cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
     id note = noteAtIndex(idx, nil);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
-        return;
+        return 1;
     }
 
     NSString *rawText = noteRawText(note);
@@ -778,19 +779,21 @@ void cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
     if (found.location == NSNotFound) {
         fprintf(stderr, "Error: Text not found in note %lu: \"%s\"\n",
                 (unsigned long)idx, [findStr UTF8String]);
-        return;
+        return 1;
     }
 
     NSString *newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
                                                           withString:replaceStr];
 
-    if (!applyCRDTEdit(note, rawText, newRaw)) return;
+    if (!applyCRDTEdit(note, rawText, newRaw)) return 1;
 
     if (saveContext()) {
         printf("✓ Replaced \"%s\" → \"%s\" in note %lu.\n",
                [findStr UTF8String], [replaceStr UTF8String], (unsigned long)idx);
+        return 0;
     } else {
         fprintf(stderr, "Error: save failed\n");
+        return 1;
     }
 }
 
@@ -1668,8 +1671,7 @@ int main(int argc, char *argv[]) {
                 [NSString stringWithFormat:@"%d", [sub intValue]]]) {
                 NSUInteger idx = (NSUInteger)[sub intValue];
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
-                cmdNotesView(idx, nil, jsonOut);
-                return 0;
+                return cmdNotesView(idx, nil, jsonOut);
             }
 
             // ── cider notes list ──
@@ -1688,7 +1690,7 @@ int main(int argc, char *argv[]) {
                 if (!idx) idx = promptNoteIndex(@"show", nil);
                 if (!idx) return 1;
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
-                cmdNotesView(idx, nil, jsonOut);
+                return cmdNotesView(idx, nil, jsonOut);
 
             // ── cider notes folders ──
             } else if ([sub isEqualToString:@"folders"]) {
@@ -1762,7 +1764,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Usage: cider notes replace <N> --find <text> --replace <text>\n");
                     return 1;
                 }
-                cmdNotesReplace(idx, findStr, replaceStr);
+                return cmdNotesReplace(idx, findStr, replaceStr);
 
             // ── cider notes search ──
             } else if ([sub isEqualToString:@"search"]) {
