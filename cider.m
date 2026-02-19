@@ -1404,141 +1404,353 @@ void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Reminders Core Data context
+// ─────────────────────────────────────────────────────────────────────────────
+
+static NSManagedObjectContext *g_remMOC = nil;
+static NSPersistentStoreCoordinator *g_remPSC = nil;
+
+BOOL initRemindersContext(void) {
+    if (g_remMOC) return YES;
+
+    // Load ReminderKit framework for its managed object model
+    void *rkHandle = dlopen(
+        "/System/Library/PrivateFrameworks/ReminderKit.framework/ReminderKit",
+        RTLD_NOW);
+    if (!rkHandle) {
+        fprintf(stderr, "Warning: Could not load ReminderKit.framework: %s\n",
+                dlerror());
+    }
+
+    // Load the managed object model
+    NSString *momdPath =
+        @"/System/Library/PrivateFrameworks/ReminderKit.framework"
+        @"/Versions/A/Resources/ReminderData.momd";
+    NSURL *momdURL = [NSURL fileURLWithPath:momdPath];
+    NSManagedObjectModel *model =
+        [[NSManagedObjectModel alloc] initWithContentsOfURL:momdURL];
+    if (!model) {
+        fprintf(stderr, "Error: Could not load Reminders model from %s\n",
+                [momdPath UTF8String]);
+        return NO;
+    }
+
+    g_remPSC = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model];
+
+    // Scan for .sqlite files in the Reminders container
+    NSString *storesDir = [NSHomeDirectory() stringByAppendingPathComponent:
+        @"Library/Group Containers/group.com.apple.reminders/Container_v1/Stores"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *contents = [fm contentsOfDirectoryAtPath:storesDir error:nil];
+
+    NSDictionary *storeOpts = @{
+        NSMigratePersistentStoresAutomaticallyOption: @YES,
+        NSInferMappingModelAutomaticallyOption: @YES,
+        NSSQLitePragmasOption: @{@"journal_mode": @"WAL"}
+    };
+
+    NSURL *bestStore = nil;
+    NSUInteger bestCount = 0;
+
+    for (NSString *file in contents) {
+        if (![file hasSuffix:@".sqlite"]) continue;
+        NSString *fullPath = [storesDir stringByAppendingPathComponent:file];
+        NSURL *storeURL = [NSURL fileURLWithPath:fullPath];
+
+        // Try adding this store
+        NSError *err = nil;
+        NSPersistentStore *store =
+            [g_remPSC addPersistentStoreWithType:NSSQLiteStoreType
+                                   configuration:nil
+                                             URL:storeURL
+                                         options:storeOpts
+                                           error:&err];
+        if (!store) continue;
+
+        // Check how many reminders it has
+        NSManagedObjectContext *tmpMOC = [[NSManagedObjectContext alloc]
+            initWithConcurrencyType:NSMainQueueConcurrencyType];
+        [tmpMOC setPersistentStoreCoordinator:g_remPSC];
+
+        NSFetchRequest *countReq =
+            [NSFetchRequest fetchRequestWithEntityName:@"REMCDReminder"];
+        NSUInteger count = [tmpMOC countForFetchRequest:countReq error:nil];
+
+        if (count > bestCount) {
+            bestCount = count;
+            bestStore = storeURL;
+        }
+
+        // Remove this store so we can try others
+        [g_remPSC removePersistentStore:store error:nil];
+    }
+
+    if (!bestStore) {
+        fprintf(stderr, "Error: No Reminders database found in %s\n",
+                [storesDir UTF8String]);
+        return NO;
+    }
+
+    // Re-add the best store permanently
+    NSError *err = nil;
+    if (![g_remPSC addPersistentStoreWithType:NSSQLiteStoreType
+                                configuration:nil
+                                          URL:bestStore
+                                      options:storeOpts
+                                        error:&err]) {
+        fprintf(stderr, "Error opening Reminders store: %s\n",
+                [[err localizedDescription] UTF8String]);
+        return NO;
+    }
+
+    g_remMOC = [[NSManagedObjectContext alloc]
+        initWithConcurrencyType:NSMainQueueConcurrencyType];
+    [g_remMOC setPersistentStoreCoordinator:g_remPSC];
+
+    return YES;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reminders helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+static NSArray *fetchIncompleteReminders(void) {
+    NSFetchRequest *req =
+        [NSFetchRequest fetchRequestWithEntityName:@"REMCDReminder"];
+    req.predicate = [NSPredicate predicateWithFormat:
+        @"completed == NO AND markedForDeletion == NO"];
+    req.sortDescriptors = @[
+        [NSSortDescriptor sortDescriptorWithKey:@"creationDate" ascending:YES]
+    ];
+    NSError *err = nil;
+    NSArray *results = [g_remMOC executeFetchRequest:req error:&err];
+    if (err) {
+        fprintf(stderr, "Error fetching reminders: %s\n",
+                [[err localizedDescription] UTF8String]);
+        return @[];
+    }
+    return results ?: @[];
+}
+
+static NSString *listNameForReminder(NSManagedObject *rem) {
+    NSManagedObject *list = [rem valueForKey:@"list"];
+    if (list) {
+        NSString *name = [list valueForKey:@"name"];
+        if (name) return name;
+    }
+    return @"(no list)";
+}
+
+static NSString *formatDueDate(NSDate *date) {
+    if (!date) return nil;
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    [fmt setDateFormat:@"yyyy-MM-dd HH:mm"];
+    return [fmt stringFromDate:date];
+}
+
+static NSDate *parseDueDate(NSString *str) {
+    if (!str) return nil;
+    NSArray *formats = @[
+        @"yyyy-MM-dd HH:mm",
+        @"yyyy-MM-dd'T'HH:mm:ss",
+        @"yyyy-MM-dd'T'HH:mm",
+        @"yyyy-MM-dd",
+        @"MM/dd/yyyy",
+        @"MM/dd/yyyy HH:mm",
+        @"MMM d, yyyy",
+        @"MMMM d, yyyy"
+    ];
+    for (NSString *f in formats) {
+        NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+        [fmt setDateFormat:f];
+        [fmt setLocale:[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"]];
+        NSDate *d = [fmt dateFromString:str];
+        if (d) return d;
+    }
+    // Try NSDataDetector as last resort
+    NSDataDetector *det = [NSDataDetector dataDetectorWithTypes:NSTextCheckingTypeDate
+                                                         error:nil];
+    NSTextCheckingResult *match =
+        [det firstMatchInString:str options:0 range:NSMakeRange(0, str.length)];
+    if (match) return match.date;
+    return nil;
+}
+
+static NSManagedObject *findDefaultList(void) {
+    NSFetchRequest *req =
+        [NSFetchRequest fetchRequestWithEntityName:@"REMCDBaseList"];
+    req.predicate = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
+    req.sortDescriptors = @[
+        [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES]
+    ];
+    NSArray *lists = [g_remMOC executeFetchRequest:req error:nil];
+    if (!lists || lists.count == 0) return nil;
+
+    // Prefer list named "Reminders"
+    for (NSManagedObject *l in lists) {
+        if ([[l valueForKey:@"name"] isEqualToString:@"Reminders"]) return l;
+    }
+    return lists[0];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMMANDS: rem (Reminders)
 // ─────────────────────────────────────────────────────────────────────────────
 
 void cmdRemList(void) {
-    NSString *script =
-        @"tell application \"Reminders\"\n"
-        @"  set output to \"\"\n"
-        @"  set idx to 1\n"
-        @"  repeat with aList in every list\n"
-        @"    set rems to (every reminder of aList whose completed is false)\n"
-        @"    repeat with r in rems\n"
-        @"      set dueInfo to \"\"\n"
-        @"      try\n"
-        @"        set dueDate to due date of r\n"
-        @"        set dueInfo to \"  [due \" & (dueDate as string) & \"]\"\n"
-        @"      end try\n"
-        @"      set listName to name of aList\n"
-        @"      set output to output & idx & \". \" & (name of r) & "
-        @"                    \" (\" & listName & \")\" & dueInfo & \"\n\"\n"
-        @"      set idx to idx + 1\n"
-        @"    end repeat\n"
-        @"  end repeat\n"
-        @"  if output is \"\" then return \"(no incomplete reminders)\"\n"
-        @"  return output\n"
-        @"end tell";
+    if (!initRemindersContext()) return;
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error listing reminders: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
-        printf("%s\n", [[res stringValue] UTF8String]);
+    NSArray *rems = fetchIncompleteReminders();
+    if (rems.count == 0) {
+        printf("(no incomplete reminders)\n");
+        return;
+    }
+
+    for (NSUInteger i = 0; i < rems.count; i++) {
+        NSManagedObject *r = rems[i];
+        NSString *title = [r valueForKey:@"title"] ?: @"(untitled)";
+        NSString *listName = listNameForReminder(r);
+        NSDate *due = [r valueForKey:@"dueDate"];
+        NSString *dueStr = formatDueDate(due);
+
+        if (dueStr) {
+            printf("%lu. %s (%s)  [due %s]\n",
+                   (unsigned long)(i + 1),
+                   [title UTF8String],
+                   [listName UTF8String],
+                   [dueStr UTF8String]);
+        } else {
+            printf("%lu. %s (%s)\n",
+                   (unsigned long)(i + 1),
+                   [title UTF8String],
+                   [listName UTF8String]);
+        }
     }
 }
 
 void cmdRemAdd(NSString *title, NSString *dueDate) {
-    NSString *esc = [title stringByReplacingOccurrencesOfString:@"\""
-                                                     withString:@"\\\""];
-    NSString *script;
+    if (!initRemindersContext()) return;
+
+    NSManagedObject *defaultList = findDefaultList();
+    if (!defaultList) {
+        fprintf(stderr, "Error: No reminder lists found\n");
+        return;
+    }
+
+    NSManagedObject *rem = [NSEntityDescription
+        insertNewObjectForEntityForName:@"REMCDReminder"
+                 inManagedObjectContext:g_remMOC];
+
+    [rem setValue:title forKey:@"title"];
+    [rem setValue:[NSDate date] forKey:@"creationDate"];
+    [rem setValue:[NSDate date] forKey:@"lastModifiedDate"];
+    [rem setValue:@NO forKey:@"completed"];
+    [rem setValue:@NO forKey:@"markedForDeletion"];
+    [rem setValue:@NO forKey:@"flagged"];
+    [rem setValue:@0 forKey:@"priority"];
+    [rem setValue:defaultList forKey:@"list"];
+
+    // Copy account from the list
+    NSManagedObject *account = [defaultList valueForKey:@"account"];
+    if (account) {
+        [rem setValue:account forKey:@"account"];
+    }
+
+    // Set due date if provided
     if (dueDate) {
-        NSString *escDate = [dueDate stringByReplacingOccurrencesOfString:@"\""
-                                                               withString:@"\\\""];
-        script = [NSString stringWithFormat:
-            @"tell application \"Reminders\"\n"
-            @"  set r to make new reminder with properties "
-            @"    {name:\"%@\", due date:date \"%@\"}\n"
-            @"  return name of r\n"
-            @"end tell", esc, escDate];
-    } else {
-        script = [NSString stringWithFormat:
-            @"tell application \"Reminders\"\n"
-            @"  set r to make new reminder with properties {name:\"%@\"}\n"
-            @"  return name of r\n"
-            @"end tell", esc];
+        NSDate *due = parseDueDate(dueDate);
+        if (due) {
+            [rem setValue:due forKey:@"dueDate"];
+            [rem setValue:@YES forKey:@"allDay"];
+        } else {
+            fprintf(stderr, "Warning: Could not parse date \"%s\", "
+                    "adding without due date\n", [dueDate UTF8String]);
+        }
     }
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error adding reminder: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
-        printf("Added reminder: \"%s\"\n",
-               [[res stringValue] ?: title UTF8String]);
+    NSError *saveErr = nil;
+    [g_remMOC save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving reminder: %s\n",
+                [[saveErr localizedDescription] UTF8String]);
+        return;
     }
-}
-
-NSString *remScriptFindAndAct(NSUInteger idx, NSString *action) {
-    return [NSString stringWithFormat:
-        @"tell application \"Reminders\"\n"
-        @"  set idx to 0\n"
-        @"  repeat with aList in every list\n"
-        @"    set rems to (every reminder of aList whose completed is false)\n"
-        @"    repeat with r in rems\n"
-        @"      set idx to idx + 1\n"
-        @"      if idx = %lu then\n"
-        @"        %@\n"
-        @"      end if\n"
-        @"    end repeat\n"
-        @"  end repeat\n"
-        @"  return \"Reminder %lu not found\"\n"
-        @"end tell",
-        (unsigned long)idx, action, (unsigned long)idx];
+    printf("Added reminder: \"%s\"\n", [title UTF8String]);
 }
 
 void cmdRemEdit(NSUInteger idx, NSString *newTitle) {
-    NSString *esc = [newTitle stringByReplacingOccurrencesOfString:@"\""
-                                                        withString:@"\\\""];
-    NSString *action = [NSString stringWithFormat:
-        @"set name of r to \"%@\"\n"
-        @"        return \"Updated: \" & name of r", esc];
-    NSString *script = remScriptFindAndAct(idx, action);
+    if (!initRemindersContext()) return;
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error editing reminder: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
-        printf("%s\n", [[res stringValue] UTF8String]);
+    NSArray *rems = fetchIncompleteReminders();
+    if (idx < 1 || idx > rems.count) {
+        fprintf(stderr, "Reminder %lu not found (have %lu)\n",
+                (unsigned long)idx, (unsigned long)rems.count);
+        return;
     }
+
+    NSManagedObject *r = rems[idx - 1];
+    [r setValue:newTitle forKey:@"title"];
+    [r setValue:[NSDate date] forKey:@"lastModifiedDate"];
+
+    NSError *saveErr = nil;
+    [g_remMOC save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n",
+                [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+    printf("Updated: %s\n", [newTitle UTF8String]);
 }
 
 void cmdRemDelete(NSUInteger idx) {
-    NSString *action =
-        @"set rName to name of r\n"
-        @"        delete r\n"
-        @"        return \"Deleted: \" & rName";
-    NSString *script = remScriptFindAndAct(idx, action);
+    if (!initRemindersContext()) return;
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error deleting reminder: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
-        printf("%s\n", [[res stringValue] UTF8String]);
+    NSArray *rems = fetchIncompleteReminders();
+    if (idx < 1 || idx > rems.count) {
+        fprintf(stderr, "Reminder %lu not found (have %lu)\n",
+                (unsigned long)idx, (unsigned long)rems.count);
+        return;
     }
+
+    NSManagedObject *r = rems[idx - 1];
+    NSString *title = [r valueForKey:@"title"] ?: @"(untitled)";
+    [r setValue:@YES forKey:@"markedForDeletion"];
+    [r setValue:[NSDate date] forKey:@"lastModifiedDate"];
+
+    NSError *saveErr = nil;
+    [g_remMOC save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n",
+                [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+    printf("Deleted: %s\n", [title UTF8String]);
 }
 
 void cmdRemComplete(NSUInteger idx) {
-    NSString *action =
-        @"set completed of r to true\n"
-        @"        return \"Completed: \" & name of r";
-    NSString *script = remScriptFindAndAct(idx, action);
+    if (!initRemindersContext()) return;
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error completing reminder: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
-        printf("%s\n", [[res stringValue] UTF8String]);
+    NSArray *rems = fetchIncompleteReminders();
+    if (idx < 1 || idx > rems.count) {
+        fprintf(stderr, "Reminder %lu not found (have %lu)\n",
+                (unsigned long)idx, (unsigned long)rems.count);
+        return;
     }
+
+    NSManagedObject *r = rems[idx - 1];
+    NSString *title = [r valueForKey:@"title"] ?: @"(untitled)";
+    [r setValue:@YES forKey:@"completed"];
+    [r setValue:[NSDate date] forKey:@"completionDate"];
+    [r setValue:[NSDate date] forKey:@"lastModifiedDate"];
+
+    NSError *saveErr = nil;
+    [g_remMOC save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n",
+                [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+    printf("Completed: %s\n", [title UTF8String]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
