@@ -79,7 +79,10 @@ BOOL initNotesContext(void) {
 
 NSArray *fetchNotes(NSPredicate *predicate) {
     NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICNote"];
-    req.predicate = predicate;
+    NSPredicate *notDeleted = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
+    req.predicate = predicate
+        ? [NSCompoundPredicate andPredicateWithSubpredicates:@[notDeleted, predicate]]
+        : notDeleted;
     req.sortDescriptors = @[
         [NSSortDescriptor sortDescriptorWithKey:@"modificationDate"
                                       ascending:NO]
@@ -94,11 +97,12 @@ NSArray *fetchNotes(NSPredicate *predicate) {
 }
 
 NSArray *fetchAllNotes(void) {
-    return fetchNotes(nil);
+    return fetchNotes([NSPredicate predicateWithFormat:@"markedForDeletion == NO"]);
 }
 
 NSArray *fetchFolders(void) {
     NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    req.predicate = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
     req.sortDescriptors = @[
         [NSSortDescriptor sortDescriptorWithKey:@"title" ascending:YES]
     ];
@@ -115,13 +119,14 @@ NSArray *fetchFolders(void) {
 // Find a folder by title, optionally creating it if it doesn't exist
 id findOrCreateFolder(NSString *title, BOOL create) {
     NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
-    req.predicate = [NSPredicate predicateWithFormat:@"title == %@", title];
+    req.predicate = [NSPredicate predicateWithFormat:@"title == %@ AND markedForDeletion == NO", title];
     NSArray *results = [g_moc executeFetchRequest:req error:nil];
     if (results.count > 0) return results.firstObject;
     if (!create) return nil;
 
-    // Get account from an existing folder
+    // Get account from an existing (non-deleted) folder
     NSFetchRequest *fReq = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    fReq.predicate = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
     NSArray *allFolders = [g_moc executeFetchRequest:fReq error:nil];
     id account = nil;
     for (id f in allFolders) {
