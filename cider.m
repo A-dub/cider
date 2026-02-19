@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "2.0.0"
+#define VERSION "2.1.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // Forward declarations
