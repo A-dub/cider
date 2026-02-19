@@ -259,11 +259,11 @@ See [Reverse Engineering Notes](https://github.com/A-dub/cider/wiki) for the ful
 
 ## Troubleshooting
 
-**"Not authorized to send Apple events"** — macOS needs permission for automation. Go to System Settings → Privacy & Security → Automation and allow your terminal app to control Notes and Reminders.
+**"Cannot access the Notes database"** — cider needs Full Disk Access to read the Notes and Reminders databases. Go to **System Settings → Privacy & Security → Full Disk Access** and add your terminal app (Terminal.app, iTerm, Warp, etc.). Restart your terminal after granting access.
 
 **"Failed to load NotesShared.framework"** — You're on an unsupported macOS version, or Apple changed the framework location. Check the [troubleshooting guide](https://github.com/A-dub/cider/wiki).
 
-**Reminders not working** — Reminders requires a one-time automation approval. Run any `cider rem` command from Terminal.app (not over SSH) the first time to trigger the permission dialog.
+**"Not authorized to send Apple events"** — Reminders still uses AppleScript as a fallback. Go to System Settings → Privacy & Security → Automation and allow your terminal app to control Reminders.
 
 ## License
 

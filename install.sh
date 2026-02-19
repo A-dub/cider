@@ -51,3 +51,12 @@ fi
 
 echo "Installed cider $TAG to $INSTALL_DIR/$BINARY"
 "$INSTALL_DIR/$BINARY" --version
+
+echo ""
+echo "NOTE: cider needs Full Disk Access to read Apple Notes and Reminders."
+echo ""
+echo "  1. Open System Settings → Privacy & Security → Full Disk Access"
+echo "  2. Add your terminal app (Terminal.app, iTerm, Warp, etc.)"
+echo "  3. Restart your terminal"
+echo ""
+echo "Without this, you'll get 'Cannot access the Notes database' errors."
