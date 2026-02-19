@@ -87,11 +87,9 @@ BOOL initNotesContext(void) {
                 "This is usually a macOS permissions issue. To fix it:\n"
                 "\n"
                 "  1. Open System Settings → Privacy & Security → Full Disk Access\n"
-                "  2. Click the + button and add your terminal app\n"
+                "  2. Click + and add your terminal app\n"
                 "     (Terminal.app, iTerm, Warp, etc.)\n"
-                "  3. If running cider directly (not from a terminal), add the\n"
-                "     cider binary itself\n"
-                "  4. Restart your terminal\n"
+                "  3. Restart your terminal\n"
                 "\n");
         } else {
             fprintf(stderr, "Error: Failed to read Notes database: %s\n",
@@ -1526,11 +1524,9 @@ BOOL initRemindersContext(void) {
                 "This is usually a macOS permissions issue. To fix it:\n"
                 "\n"
                 "  1. Open System Settings → Privacy & Security → Full Disk Access\n"
-                "  2. Click the + button and add your terminal app\n"
+                "  2. Click + and add your terminal app\n"
                 "     (Terminal.app, iTerm, Warp, etc.)\n"
-                "  3. If running cider directly (not from a terminal), add the\n"
-                "     cider binary itself\n"
-                "  4. Restart your terminal\n"
+                "  3. Restart your terminal\n"
                 "\n");
         } else {
             fprintf(stderr, "Error: No Reminders database found in %s\n",
@@ -1557,11 +1553,9 @@ BOOL initRemindersContext(void) {
                 "This is usually a macOS permissions issue. To fix it:\n"
                 "\n"
                 "  1. Open System Settings → Privacy & Security → Full Disk Access\n"
-                "  2. Click the + button and add your terminal app\n"
+                "  2. Click + and add your terminal app\n"
                 "     (Terminal.app, iTerm, Warp, etc.)\n"
-                "  3. If running cider directly (not from a terminal), add the\n"
-                "     cider binary itself\n"
-                "  4. Restart your terminal\n"
+                "  3. Restart your terminal\n"
                 "\n");
         } else {
             fprintf(stderr, "Error opening Reminders store: %s\n",
