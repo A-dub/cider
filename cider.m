@@ -18,6 +18,10 @@
 #define VERSION "1.1.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
+// Forward declarations
+NSArray *attachmentOrderFromCRDT(id note);
+NSString *attachmentNameByID(NSArray *atts, NSString *attID);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Global state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -990,6 +994,89 @@ void cmdNotesExport(NSString *exportPath) {
     printf("Index:    %s\n", [indexPath UTF8String]);
 }
 
+void cmdNotesAttachments(NSUInteger idx, BOOL jsonOut) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSArray *orderedIDs = attachmentOrderFromCRDT(note);
+    NSArray *atts = attachmentsAsArray(noteVisibleAttachments(note));
+    NSString *raw = noteRawText(note);
+
+    // Find marker positions
+    NSMutableArray *markerPositions = [NSMutableArray array];
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        if ([raw characterAtIndex:i] == ATTACHMENT_MARKER)
+            [markerPositions addObject:@(i)];
+    }
+
+    NSUInteger count = orderedIDs ? orderedIDs.count : 0;
+
+    if (jsonOut) {
+        printf("[");
+        for (NSUInteger i = 0; i < count; i++) {
+            id val = orderedIDs[i];
+            NSString *attID = (val != [NSNull null]) ? val : nil;
+            NSString *name = attID ? attachmentNameByID(atts, attID) : @"attachment";
+            NSString *uti = @"unknown";
+            NSUInteger pos = (i < markerPositions.count)
+                ? [markerPositions[i] unsignedIntegerValue] : 0;
+            if (attID) {
+                for (id att in atts) {
+                    NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+                        att, NSSelectorFromString(@"identifier"));
+                    if ([ident isEqualToString:attID]) {
+                        id u = [att valueForKey:@"typeUTI"];
+                        if (u) uti = u;
+                        break;
+                    }
+                }
+            }
+            printf("%s{\"index\":%lu,\"name\":\"%s\",\"type\":\"%s\",\"position\":%lu,\"id\":\"%s\"}",
+                   i > 0 ? "," : "",
+                   (unsigned long)(i + 1),
+                   [name UTF8String],
+                   [uti UTF8String],
+                   (unsigned long)pos,
+                   attID ? [attID UTF8String] : "");
+        }
+        printf("]\n");
+    } else {
+        NSString *title = noteTitle(note);
+        if (count == 0) {
+            printf("No attachments in \"%s\"\n", [title UTF8String]);
+            return;
+        }
+        printf("Attachments in \"%s\":\n", [title UTF8String]);
+        for (NSUInteger i = 0; i < count; i++) {
+            id val = orderedIDs[i];
+            NSString *attID = (val != [NSNull null]) ? val : nil;
+            NSString *name = attID ? attachmentNameByID(atts, attID) : @"attachment";
+            NSString *uti = @"unknown";
+            NSUInteger pos = (i < markerPositions.count)
+                ? [markerPositions[i] unsignedIntegerValue] : 0;
+            if (attID) {
+                for (id att in atts) {
+                    NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+                        att, NSSelectorFromString(@"identifier"));
+                    if ([ident isEqualToString:attID]) {
+                        id u = [att valueForKey:@"typeUTI"];
+                        if (u) uti = u;
+                        break;
+                    }
+                }
+            }
+            printf("  %lu. %s  (%s, position %lu)\n",
+                   (unsigned long)(i + 1),
+                   [name UTF8String],
+                   [uti UTF8String],
+                   (unsigned long)pos);
+        }
+    }
+}
+
 void cmdNotesAttach(NSUInteger idx, NSString *filePath) {
     id note = noteAtIndex(idx, nil);
     if (!note) {
@@ -1428,6 +1515,7 @@ void printHelp(void) {
 "  replace <N> --find <s> --replace <s>  Find & replace text in note N\n"
 "  search <query> [--json]             Search notes by text\n"
 "  export <path>                       Export all notes to HTML\n"
+"  attachments <N> [--json]             List attachments in note N\n"
 "  attach <N> <file> [--at <pos>]      Add file attachment to note N\n"
 "  detach <N> [<A>]                    Remove attachment A (1-based) from note N\n"
 "\n"
@@ -1474,6 +1562,7 @@ void printNotesHelp(void) {
 "                                           Find & replace text in note N\n"
 "  cider notes search <query> [--json]      Search notes\n"
 "  cider notes export <path>                Export notes to HTML\n"
+"  cider notes attachments <N> [--json]        List attachments with positions\n"
 "  cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)\n"
 "  cider notes detach <N> [<A>]               Remove attachment A from note N\n"
 "\n"
@@ -1693,6 +1782,21 @@ int main(int argc, char *argv[]) {
                 }
                 NSString *path = [NSString stringWithUTF8String:argv[3]];
                 cmdNotesExport(path);
+
+            // ── cider notes attachments ──
+            } else if ([sub isEqualToString:@"attachments"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"list attachments for", nil);
+                if (!idx) return 1;
+                BOOL json = NO;
+                for (int ai = 4; ai < argc; ai++) {
+                    if (strcmp(argv[ai], "--json") == 0) { json = YES; break; }
+                }
+                cmdNotesAttachments(idx, json);
 
             // ── cider notes detach ──
             } else if ([sub isEqualToString:@"detach"]) {

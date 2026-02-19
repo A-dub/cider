@@ -93,6 +93,10 @@ cider notes search "meeting"
 # Export all notes to HTML
 cider notes export ~/Desktop/notes-backup
 
+# List attachments in note #3 (with positions and types)
+cider notes attachments 3
+cider notes attachments 3 --json
+
 # Attach a file to note #3
 cider notes attach 3 ~/Photos/vacation.jpg
 
