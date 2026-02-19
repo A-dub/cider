@@ -1111,6 +1111,160 @@ void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position) {
            (unsigned long)position, [t UTF8String], [attID UTF8String]);
 }
 
+/**
+ * Build a mapping from text position (U+FFFC index) to attachment identifier
+ * by inspecting the CRDT attributed string attributes.
+ */
+NSArray *attachmentOrderFromCRDT(id note) {
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) return nil;
+
+    NSString *raw = noteRawText(note);
+    NSMutableArray *ordered = [NSMutableArray array];
+
+    id attrString = nil;
+    @try {
+        attrString = ((id (*)(id, SEL))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"attributedString"));
+    }
+    @catch (NSException *e) { return nil; }
+    if (!attrString) return nil;
+
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        if ([raw characterAtIndex:i] != ATTACHMENT_MARKER) continue;
+        NSString *attID = nil;
+        @try {
+            NSRange effRange;
+            NSDictionary *attrs = [(NSAttributedString *)attrString
+                attributesAtIndex:i effectiveRange:&effRange];
+            id ttAtt = attrs[@"NSAttachment"];
+            if (ttAtt) {
+                attID = ((id (*)(id, SEL))objc_msgSend)(
+                    ttAtt, NSSelectorFromString(@"attachmentIdentifier"));
+            }
+        }
+        @catch (NSException *e) {}
+        // Store identifier (or NSNull if we couldn't resolve it)
+        [ordered addObject:attID ?: (id)[NSNull null]];
+    }
+    return ordered;
+}
+
+/**
+ * Get attachment display name by identifier from the Core Data entities.
+ */
+NSString *attachmentNameByID(NSArray *atts, NSString *attID) {
+    if (!attID || !atts) return @"attachment";
+    for (id att in atts) {
+        NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+            att, NSSelectorFromString(@"identifier"));
+        if (![ident isEqualToString:attID]) continue;
+        id ut = [att valueForKey:@"userTitle"];
+        if (ut && [ut isKindOfClass:[NSString class]] && [(NSString *)ut length] > 0)
+            return (NSString *)ut;
+        id t = [att valueForKey:@"title"];
+        if (t && [t isKindOfClass:[NSString class]] && [(NSString *)t length] > 0)
+            return (NSString *)t;
+        id uti = [att valueForKey:@"typeUTI"];
+        if (uti && [uti isKindOfClass:[NSString class]])
+            return [NSString stringWithFormat:@"[%@]", uti];
+        return @"attachment";
+    }
+    return @"attachment";
+}
+
+void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    // Get raw text and find the Nth U+FFFC marker position
+    NSString *raw = noteRawText(note);
+    NSMutableArray *markerPositions = [NSMutableArray array];
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        if ([raw characterAtIndex:i] == ATTACHMENT_MARKER) {
+            [markerPositions addObject:@(i)];
+        }
+    }
+
+    if (markerPositions.count == 0) {
+        fprintf(stderr, "Error: Note has no inline attachments\n");
+        return;
+    }
+
+    // attIdx is 0-based attachment index (in text order)
+    if (attIdx >= markerPositions.count) {
+        fprintf(stderr, "Error: Attachment index %lu out of range (note has %lu inline attachment(s))\n",
+                (unsigned long)(attIdx + 1), (unsigned long)markerPositions.count);
+        return;
+    }
+
+    NSUInteger charPos = [markerPositions[attIdx] unsignedIntegerValue];
+
+    // Get ordered attachment identifiers from CRDT attributed string
+    NSArray *orderedIDs = attachmentOrderFromCRDT(note);
+    NSString *targetAttID = nil;
+    if (orderedIDs && attIdx < orderedIDs.count) {
+        id val = orderedIDs[attIdx];
+        if (val != [NSNull null]) targetAttID = val;
+    }
+
+    // Get Core Data entities
+    NSArray *atts = attachmentsAsArray(noteVisibleAttachments(note));
+
+    // Get display name before deletion
+    NSString *removedName = targetAttID
+        ? attachmentNameByID(atts, targetAttID) : @"attachment";
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return;
+    }
+
+    // 1. Remove the U+FFFC character from the CRDT string
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, NSRange))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"deleteCharactersInRange:"),
+        NSMakeRange(charPos, 1));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    // 2. Delete the Core Data attachment entity by identifier
+    BOOL deletedEntity = NO;
+    if (targetAttID) {
+        for (id att in atts) {
+            NSString *attID = ((id (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"identifier"));
+            if ([attID isEqualToString:targetAttID]) {
+                [g_moc deleteObject:att];
+                deletedEntity = YES;
+                break;
+            }
+        }
+    }
+
+    if (!deletedEntity) {
+        fprintf(stderr, "Warning: Could not identify attachment entity to delete "
+                "(CRDT marker removed but entity may be orphaned)\n");
+    }
+
+    // 3. Save
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+    NSError *saveErr = nil;
+    [g_moc save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n", [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    printf("✓ Removed attachment %lu (%s) from \"%s\"\n",
+           (unsigned long)(attIdx + 1), [removedName UTF8String], [t UTF8String]);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COMMANDS: rem (Reminders)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1275,6 +1429,7 @@ void printHelp(void) {
 "  search <query> [--json]             Search notes by text\n"
 "  export <path>                       Export all notes to HTML\n"
 "  attach <N> <file> [--at <pos>]      Add file attachment to note N\n"
+"  detach <N> [<A>]                    Remove attachment A (1-based) from note N\n"
 "\n"
 "REMINDERS SUBCOMMANDS:\n"
 "  list                               List incomplete reminders (default)\n"
@@ -1320,6 +1475,7 @@ void printNotesHelp(void) {
 "  cider notes search <query> [--json]      Search notes\n"
 "  cider notes export <path>                Export notes to HTML\n"
 "  cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)\n"
+"  cider notes detach <N> [<A>]               Remove attachment A from note N\n"
 "\n"
 "OPTIONS:\n"
 "  --json    Output as JSON (for list, show, search, folders)\n"
@@ -1537,6 +1693,58 @@ int main(int argc, char *argv[]) {
                 }
                 NSString *path = [NSString stringWithUTF8String:argv[3]];
                 cmdNotesExport(path);
+
+            // ── cider notes detach ──
+            } else if ([sub isEqualToString:@"detach"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (!idx) idx = promptNoteIndex(@"detach from", nil);
+                if (!idx) return 1;
+
+                // Get attachment index (0-based, or 1-based from user)
+                NSUInteger attIdx = 0;
+                if (argc >= 5) {
+                    attIdx = (NSUInteger)(atoi(argv[4]) - 1); // User provides 1-based
+                } else {
+                    // Show attachments and prompt (in text order via CRDT)
+                    id note = noteAtIndex(idx, nil);
+                    if (note) {
+                        NSArray *orderedIDs = attachmentOrderFromCRDT(note);
+                        NSArray *atts = attachmentsAsArray(noteVisibleAttachments(note));
+                        NSUInteger inlineCount = orderedIDs ? orderedIDs.count : 0;
+                        if (inlineCount == 0) {
+                            fprintf(stderr, "Note %lu has no inline attachments.\n", (unsigned long)idx);
+                            return 1;
+                        }
+                        printf("Attachments in note %lu:\n", (unsigned long)idx);
+                        for (NSUInteger i = 0; i < inlineCount; i++) {
+                            id val = orderedIDs[i];
+                            NSString *aName = (val != [NSNull null])
+                                ? attachmentNameByID(atts, val) : @"attachment";
+                            printf("  %lu. %s\n", (unsigned long)(i + 1), [aName UTF8String]);
+                        }
+                        if (inlineCount == 1) {
+                            attIdx = 0;
+                            printf("Removing the only attachment.\n");
+                        } else {
+                            printf("Remove which attachment? [1-%lu]: ", (unsigned long)inlineCount);
+                            fflush(stdout);
+                            char buf[32];
+                            if (fgets(buf, sizeof(buf), stdin)) {
+                                int v = atoi(buf);
+                                if (v < 1 || (NSUInteger)v > inlineCount) {
+                                    fprintf(stderr, "Invalid selection.\n");
+                                    return 1;
+                                }
+                                attIdx = (NSUInteger)(v - 1);
+                            }
+                        }
+                    }
+                }
+                cmdNotesDetach(idx, attIdx);
 
             // ── cider notes attach ──
             } else if ([sub isEqualToString:@"attach"]) {
