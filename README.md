@@ -24,6 +24,32 @@ Attachments are `U+FFFC` characters in the CRDT string. By editing text around t
 
 ## Install
 
+### Quick install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/A-dub/cider/master/install.sh | bash
+```
+
+This downloads the latest release binary for your architecture and installs to `/usr/local/bin`.
+
+### Download manually
+
+Grab the latest binary from [Releases](https://github.com/A-dub/cider/releases/latest):
+
+```bash
+# Download (Apple Silicon)
+curl -fsSL -o cider https://github.com/A-dub/cider/releases/latest/download/cider-arm64
+
+# Or Intel
+curl -fsSL -o cider https://github.com/A-dub/cider/releases/latest/download/cider-x86_64
+
+# Install
+chmod +x cider
+sudo mv cider /usr/local/bin/
+```
+
+### Build from source
+
 ```bash
 git clone https://github.com/A-dub/cider
 cd cider
@@ -34,7 +60,6 @@ make install   # copies to /usr/local/bin
 Or manually:
 ```bash
 clang -framework Foundation -framework CoreData -o cider cider.m
-cp cider /usr/local/bin/
 ```
 
 **Requirements:** macOS 12+ (Monterey or later). No Python, no pip, no Homebrew dependencies. Just `clang`.
