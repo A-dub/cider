@@ -1031,6 +1031,86 @@ void cmdNotesAttach(NSUInteger idx, NSString *filePath) {
     }
 }
 
+void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *absPath = [filePath hasPrefix:@"/"]
+        ? filePath
+        : [[[NSFileManager defaultManager] currentDirectoryPath]
+           stringByAppendingPathComponent:filePath];
+
+    if (![[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+        fprintf(stderr, "Error: File not found: %s\n", [absPath UTF8String]);
+        return;
+    }
+
+    // Get mergeable string to validate position
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for note\n");
+        return;
+    }
+
+    NSUInteger textLen = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"length"));
+    if (position > textLen) {
+        fprintf(stderr, "Error: Position %lu out of range (note length: %lu)\n",
+                (unsigned long)position, (unsigned long)textLen);
+        return;
+    }
+
+    // 1. Create ICAttachment via addAttachmentWithFileURL:
+    NSURL *fileURL = [NSURL fileURLWithPath:absPath];
+    id attachment = ((id (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"addAttachmentWithFileURL:"), fileURL);
+    if (!attachment) {
+        fprintf(stderr, "Error: addAttachmentWithFileURL: returned nil\n");
+        return;
+    }
+
+    // 2. Get identifier and UTI
+    NSString *attID = ((id (*)(id, SEL))objc_msgSend)(
+        attachment, NSSelectorFromString(@"identifier"));
+    NSString *attUTI = ((id (*)(id, SEL))objc_msgSend)(
+        attachment, NSSelectorFromString(@"typeUTI"));
+
+    // 3. Create ICTTAttachment
+    Class TTAttClass = NSClassFromString(@"ICTTAttachment");
+    id ttAtt = [[TTAttClass alloc] init];
+    ((void (*)(id, SEL, id))objc_msgSend)(ttAtt, NSSelectorFromString(@"setAttachmentIdentifier:"), attID);
+    ((void (*)(id, SEL, id))objc_msgSend)(ttAtt, NSSelectorFromString(@"setAttachmentUTI:"), attUTI);
+
+    // 4. Build attributed string with U+FFFC
+    unichar marker = ATTACHMENT_MARKER;
+    NSString *markerStr = [NSString stringWithCharacters:&marker length:1];
+    NSDictionary *attrs = @{@"NSAttachment": ttAtt};
+    NSAttributedString *attAttrStr = [[NSAttributedString alloc] initWithString:markerStr attributes:attrs];
+
+    // 5. Insert into CRDT at position
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertAttributedString:atIndex:"), attAttrStr, position);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    // 6. Update derived attributes and save
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+    NSError *saveErr = nil;
+    [g_moc save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n", [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    printf("✓ Attachment inserted at position %lu in \"%s\" (id: %s)\n",
+           (unsigned long)position, [t UTF8String], [attID UTF8String]);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COMMANDS: rem (Reminders)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1194,7 +1274,7 @@ void printHelp(void) {
 "  replace <N> --find <s> --replace <s>  Find & replace text in note N\n"
 "  search <query> [--json]             Search notes by text\n"
 "  export <path>                       Export all notes to HTML\n"
-"  attach <N> <file>                   Add file attachment to note N\n"
+"  attach <N> <file> [--at <pos>]      Add file attachment to note N\n"
 "\n"
 "REMINDERS SUBCOMMANDS:\n"
 "  list                               List incomplete reminders (default)\n"
@@ -1239,7 +1319,7 @@ void printNotesHelp(void) {
 "                                           Find & replace text in note N\n"
 "  cider notes search <query> [--json]      Search notes\n"
 "  cider notes export <path>                Export notes to HTML\n"
-"  cider notes attach <N> <file>            Attach file to note N\n"
+"  cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)\n"
 "\n"
 "OPTIONS:\n"
 "  --json    Output as JSON (for list, show, search, folders)\n"
@@ -1472,7 +1552,20 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *filePath = [NSString stringWithUTF8String:argv[4]];
-                cmdNotesAttach(idx, filePath);
+
+                // Check for --at <position>
+                NSInteger atPos = -1;
+                for (int ai = 5; ai < argc - 1; ai++) {
+                    if (strcmp(argv[ai], "--at") == 0) {
+                        atPos = (NSInteger)atoi(argv[ai + 1]);
+                        break;
+                    }
+                }
+                if (atPos >= 0) {
+                    cmdNotesAttachAt(idx, filePath, (NSUInteger)atPos);
+                } else {
+                    cmdNotesAttach(idx, filePath);
+                }
 
             // ── Legacy flag aliases ──────────────────────────────────────────
 
@@ -1552,7 +1645,19 @@ int main(int argc, char *argv[]) {
                 }
                 NSUInteger idx = (NSUInteger)atoi(argv[3]);
                 NSString *filePath = [NSString stringWithUTF8String:argv[4]];
-                cmdNotesAttach(idx, filePath);
+
+                NSInteger atPos = -1;
+                for (int ai = 5; ai < argc - 1; ai++) {
+                    if (strcmp(argv[ai], "--at") == 0) {
+                        atPos = (NSInteger)atoi(argv[ai + 1]);
+                        break;
+                    }
+                }
+                if (atPos >= 0) {
+                    cmdNotesAttachAt(idx, filePath, (NSUInteger)atPos);
+                } else {
+                    cmdNotesAttach(idx, filePath);
+                }
 
             } else {
                 fprintf(stderr, "Unknown notes subcommand: %s\n", argv[2]);
