@@ -96,9 +96,15 @@ cider notes export ~/Desktop/notes-backup
 # Attach a file to note #3
 cider notes attach 3 ~/Photos/vacation.jpg
 
+# Attach at a specific text position (CRDT-based)
+cider notes attach 3 ~/Photos/vacation.jpg --at 42
+
+# Remove attachment #1 from note #3
+cider notes detach 3 1
+
 # Interactive mode: omit N to get prompted (when stdin is a terminal)
 cider notes edit       # shows list, prompts "Enter note number to edit: "
-cider notes delete     # same for delete, show, move, replace, attach
+cider notes delete     # same for delete, show, move, replace, attach, detach
 ```
 
 #### Backwards compatibility
@@ -178,7 +184,8 @@ cider notes replace 3 --find "old text" --replace "new text"
 | **Edit / Replace** | `ICTTMergeableString` CRDT API (preserves attachments) |
 | **List / View / Search** | Core Data fetch via `ICNoteContext` (fast, no AppleScript) |
 | **Add / Delete / Move** | `NSAppleScript` (reliable, handles iCloud sync) |
-| **Attach** | `NSAppleScript` (`make new attachment`) |
+| **Attach** | `NSAppleScript` (default) or CRDT API (`--at` flag) |
+| **Detach** | CRDT API + Core Data entity deletion |
 | **Reminders** | `NSAppleScript` (Reminders.app) |
 
 Single Objective-C file. No external dependencies. Compiles in under a second.
@@ -212,6 +219,7 @@ See [Reverse Engineering Notes](https://github.com/A-dub/cider/wiki) for the ful
 | Search | ✅ (fzf) | ✅ (Core Data) |
 | Export | ✅ HTML+MD | ✅ HTML |
 | **Attach files** | ❌ | ✅ |
+| **Remove attachments** | ❌ | ✅ (CRDT + entity cleanup) |
 | **Preserve images on edit** | ❌ | ✅ |
 | **JSON output** | ❌ | ✅ (`--json` flag) |
 | **Pipe-friendly** | ❌ | ✅ (stdin edit, JSON out) |
