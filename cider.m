@@ -21,6 +21,7 @@
 // Forward declarations
 NSArray *attachmentOrderFromCRDT(id note);
 NSString *attachmentNameByID(NSArray *atts, NSString *attID);
+void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Global state
@@ -111,7 +112,46 @@ NSArray *fetchFolders(void) {
     return results ?: @[];
 }
 
-// Get the x-coredata:// URI string for a note (used by AppleScript)
+// Find a folder by title, optionally creating it if it doesn't exist
+id findOrCreateFolder(NSString *title, BOOL create) {
+    NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    req.predicate = [NSPredicate predicateWithFormat:@"title == %@", title];
+    NSArray *results = [g_moc executeFetchRequest:req error:nil];
+    if (results.count > 0) return results.firstObject;
+    if (!create) return nil;
+
+    // Get account from an existing folder
+    NSFetchRequest *fReq = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    NSArray *allFolders = [g_moc executeFetchRequest:fReq error:nil];
+    id account = nil;
+    for (id f in allFolders) {
+        account = [f valueForKey:@"account"];
+        if (account) break;
+    }
+    if (!account) return nil;
+
+    id newFolder = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICFolder"
+                 inManagedObjectContext:g_moc];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newFolder, NSSelectorFromString(@"setTitle:"), title);
+    [newFolder setValue:account forKey:@"account"];
+    return newFolder;
+}
+
+// Get the default folder ("Notes") or the first available folder
+id defaultFolder(void) {
+    id folder = findOrCreateFolder(@"Notes", NO);
+    if (folder) return folder;
+    NSArray *all = fetchFolders();
+    for (id f in all) {
+        NSString *t = [f valueForKey:@"title"];
+        if (t && t.length > 0) return f;
+    }
+    return nil;
+}
+
+// Get the x-coredata:// URI string for a note
 NSString *noteURIString(id note) {
     id objID = ((id (*)(id, SEL))objc_msgSend)(
         note, NSSelectorFromString(@"objectID"));
@@ -606,7 +646,7 @@ int cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
     return 0;
 }
 
-void cmdNotesAdd(NSString *folder) {
+void cmdNotesAdd(NSString *folderName) {
     NSString *content = nil;
 
     if (!isatty(STDIN_FILENO)) {
@@ -635,38 +675,62 @@ void cmdNotesAdd(NSString *folder) {
         return;
     }
 
-    NSString *esc = [content stringByReplacingOccurrencesOfString:@"\\"
-                                                       withString:@"\\\\"];
-    esc = [esc stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-
-    NSString *script;
-    if (folder) {
-        script = [NSString stringWithFormat:
-            @"tell application \"Notes\"\n"
-            @"  if not (exists folder \"%@\") then\n"
-            @"    make new folder with properties {name:\"%@\"}\n"
-            @"  end if\n"
-            @"  tell folder \"%@\"\n"
-            @"    set newNote to make new note with properties {body:\"%@\"}\n"
-            @"    return name of newNote\n"
-            @"  end tell\n"
-            @"end tell", folder, folder, folder, esc];
-    } else {
-        script = [NSString stringWithFormat:
-            @"tell application \"Notes\"\n"
-            @"  set newNote to make new note with properties {body:\"%@\"}\n"
-            @"  return name of newNote\n"
-            @"end tell", esc];
+    // Find or create target folder
+    id folder = folderName
+        ? findOrCreateFolder(folderName, YES)
+        : defaultFolder();
+    if (!folder) {
+        fprintf(stderr, "Error: Could not find or create folder\n");
+        return;
     }
+    id account = [folder valueForKey:@"account"];
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error creating note: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
+    // Create note entity
+    id newNote = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICNote"
+                 inManagedObjectContext:g_moc];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newNote, NSSelectorFromString(@"setFolder:"), folder);
+    if (account) {
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            newNote, NSSelectorFromString(@"setAccount:"), account);
+    }
+    [newNote setValue:[NSDate date] forKey:@"creationDate"];
+    [newNote setValue:[NSDate date] forKey:@"modificationDate"];
+
+    // Create ICNoteData entity and link
+    id noteDataEntity = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICNoteData"
+                 inManagedObjectContext:g_moc];
+    [newNote setValue:noteDataEntity forKey:@"noteData"];
+
+    // Write text via CRDT
+    id mergeStr = noteMergeableString(newNote);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for new note\n");
+        [g_moc rollback];
+        return;
+    }
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertString:atIndex:"),
+        content, (NSUInteger)0);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    // Save CRDT data to noteData (handles compression)
+    ((void (*)(id, SEL))objc_msgSend)(
+        newNote, NSSelectorFromString(@"saveNoteData"));
+
+    // Update derived attributes (title, snippet)
+    ((void (*)(id, SEL))objc_msgSend)(
+        newNote, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    if (saveContext()) {
+        NSString *t = noteTitle(newNote);
+        printf("Created note: \"%s\"\n", [t UTF8String]);
     } else {
-        printf("Created note: \"%s\"\n",
-               [[res stringValue] ?: @"(untitled)" UTF8String]);
+        fprintf(stderr, "Error: Failed to save new note\n");
     }
 }
 
@@ -814,51 +878,40 @@ void cmdNotesDelete(NSUInteger idx) {
         return;
     }
 
-    NSString *noteID = noteURIString(note);
-    NSString *script = [NSString stringWithFormat:
-        @"tell application \"Notes\"\n"
-        @"  set n to note id \"%@\"\n"
-        @"  delete n\n"
-        @"end tell", noteID];
+    ((void (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"deleteFromLocalDatabase"));
 
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error deleting note: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
+    if (saveContext()) {
         printf("Deleted: \"%s\"\n", [t UTF8String]);
+    } else {
+        fprintf(stderr, "Error: Failed to delete note\n");
     }
 }
 
-void cmdNotesMove(NSUInteger idx, NSString *targetFolder) {
+void cmdNotesMove(NSUInteger idx, NSString *targetFolderName) {
     id note = noteAtIndex(idx, nil);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
         return;
     }
 
+    id folder = findOrCreateFolder(targetFolderName, YES);
+    if (!folder) {
+        fprintf(stderr, "Error: Could not find or create folder \"%s\"\n",
+                [targetFolderName UTF8String]);
+        return;
+    }
+
     NSString *t = noteTitle(note);
-    NSString *noteID = noteURIString(note);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"setFolder:"), folder);
+    [note setValue:[NSDate date] forKey:@"modificationDate"];
 
-    NSString *script = [NSString stringWithFormat:
-        @"tell application \"Notes\"\n"
-        @"  set n to note id \"%@\"\n"
-        @"  if not (exists folder \"%@\") then\n"
-        @"    make new folder with properties {name:\"%@\"}\n"
-        @"  end if\n"
-        @"  move n to folder \"%@\"\n"
-        @"end tell",
-        noteID, targetFolder, targetFolder, targetFolder];
-
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error moving note: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
+    if (saveContext()) {
         printf("Moved \"%s\" → \"%s\"\n", [t UTF8String],
-               [targetFolder UTF8String]);
+               [targetFolderName UTF8String]);
+    } else {
+        fprintf(stderr, "Error: Failed to move note\n");
     }
 }
 
@@ -1081,6 +1134,7 @@ void cmdNotesAttachments(NSUInteger idx, BOOL jsonOut) {
 }
 
 void cmdNotesAttach(NSUInteger idx, NSString *filePath) {
+    // Default attach (no position): appends to end of note via CRDT
     id note = noteAtIndex(idx, nil);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
@@ -1097,28 +1151,17 @@ void cmdNotesAttach(NSUInteger idx, NSString *filePath) {
         return;
     }
 
-    NSString *t = noteTitle(note);
-    NSString *noteID = noteURIString(note);
-
-    NSString *script = [NSString stringWithFormat:
-        @"tell application \"Notes\"\n"
-        @"  set n to note id \"%@\"\n"
-        @"  tell n\n"
-        @"    make new attachment with properties {filename:\"%@\"} at beginning of body\n"
-        @"  end tell\n"
-        @"  return count of attachments of n\n"
-        @"end tell", noteID, absPath];
-
-    NSString *errMsg = nil;
-    NSAppleEventDescriptor *res = runAppleScript(script, &errMsg);
-    if (!res) {
-        fprintf(stderr, "Error adding attachment: %s\n",
-                errMsg ? [errMsg UTF8String] : "unknown");
-    } else {
-        printf("✓ Attachment added to \"%s\" (now %s attachment(s))\n",
-               [t UTF8String],
-               [[res stringValue] ?: @"?" UTF8String]);
+    // Get current text length to append at end
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for note\n");
+        return;
     }
+    NSUInteger textLen = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"length"));
+
+    // Use the CRDT attach-at-position path (append to end)
+    cmdNotesAttachAt(idx, filePath, textLen);
 }
 
 void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position) {

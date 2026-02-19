@@ -186,13 +186,14 @@ cider notes replace 3 --find "old text" --replace "new text"
 | Component | How |
 |-----------|-----|
 | **Edit / Replace** | `ICTTMergeableString` CRDT API (preserves attachments) |
-| **List / View / Search** | Core Data fetch via `ICNoteContext` (fast, no AppleScript) |
-| **Add / Delete / Move** | `NSAppleScript` (reliable, handles iCloud sync) |
-| **Attach** | `NSAppleScript` (default) or CRDT API (`--at` flag) |
-| **Detach** | CRDT API + Core Data entity deletion |
-| **Reminders** | `NSAppleScript` (Reminders.app) |
+| **List / View / Search** | Core Data fetch via `ICNoteContext` (fast) |
+| **Add** | Core Data insert + CRDT text + `saveNoteData` |
+| **Delete** | `deleteFromLocalDatabase` (framework) |
+| **Move** | `setFolder:` (framework) |
+| **Attach / Detach** | CRDT API (`addAttachmentWithFileURL:` + attributed string) |
+| **Reminders** | `NSAppleScript` (Reminders.app — only remaining AppleScript user) |
 
-Single Objective-C file. No external dependencies. Compiles in under a second.
+All Notes operations use the private framework directly — no AppleScript, no Notes.app process needed. Single Objective-C file. No external dependencies. Compiles in under a second.
 
 ## Private Framework Details
 

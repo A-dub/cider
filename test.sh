@@ -12,7 +12,7 @@
 #   "Cider Tests" folder to avoid touching real data).
 # ─────────────────────────────────────────────────────────────────────────────
 
-set -euo pipefail
+set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CIDER="${1:-}"
@@ -30,11 +30,15 @@ fail() { FAIL=$((FAIL + 1)); RESULTS+=("❌ FAIL: $1 — $2"); }
 skip() { SKIP=$((SKIP + 1)); RESULTS+=("⏭️  SKIP: $1 — $2"); }
 
 # Run a command, capture stdout+stderr. Sets $OUT and $RC.
+# Filters benign framework warnings from output.
 run() {
+    local tmpfile="/tmp/cider_run_$$.txt"
     set +e
-    OUT=$("$@" 2>&1)
+    "$@" > "$tmpfile" 2>&1
     RC=$?
     set -e
+    OUT=$(grep -v "ERROR: inflate failed" "$tmpfile" || true)
+    rm -f "$tmpfile"
 }
 
 # Assert $OUT contains a string
@@ -73,62 +77,47 @@ assert_matches() {
     fi
 }
 
-# Find note index by title (searches JSON output)
+# Find note index by title (searches JSON output, filters framework warnings)
 find_note() {
     local title="$1"
     "$CIDER" notes list --json 2>/dev/null \
+        | grep -v "ERROR:" \
         | grep -o '"index":[0-9]*,"title":"'"$title"'"' \
         | head -1 \
         | grep -o '[0-9]*' \
         | head -1
 }
 
-# Create a note via AppleScript (returns 0 on success)
+# Create a note using cider's framework-based add
 create_note() {
     local title="$1"
     local body="$2"
     local folder="${3:-$TEST_FOLDER}"
-    osascript -e "
-        tell application \"Notes\"
-            try
-                set f to folder \"$folder\"
-            on error
-                make new folder with properties {name:\"$folder\"}
-                set f to folder \"$folder\"
-            end try
-            make new note at f with properties {name:\"$title\", body:\"<div><h1>$title</h1><div>$body</div></div>\"}
-        end tell
-    " 2>/dev/null
+    printf '%s\n%s' "$title" "$body" | "$CIDER" notes add --folder "$folder" 2>/dev/null
 }
 
-# Delete a note by title via AppleScript
+# Delete a note by title using cider
 delete_note_as() {
     local title="$1"
-    osascript -e "
-        tell application \"Notes\"
-            set matched to every note whose name is \"$title\"
-            repeat with n in matched
-                delete n
-            end repeat
-        end tell
-    " 2>/dev/null || true
+    local idx
+    idx=$("$CIDER" notes list --json 2>/dev/null \
+        | grep -o '"index":[0-9]*,"title":"'"$title"'"' \
+        | head -1 \
+        | grep -o '[0-9]*' \
+        | head -1) || true
+    if [ -n "$idx" ]; then
+        yes y 2>/dev/null | "$CIDER" notes delete "$idx" 2>/dev/null || true
+    fi
 }
 
 # Clean up test folder
 cleanup() {
     log "Cleaning up test notes..."
     for title in "CiderTest Alpha" "CiderTest Beta" "CiderTest Gamma" \
-                 "CiderTest Delta" "CiderTest Attach" "CiderTest Piped"; do
+                 "CiderTest Delta" "CiderTest Attach" "CiderTest Piped" \
+                 "Piped note content here"; do
         delete_note_as "$title"
     done
-    # Try to delete the test folder (only if empty)
-    osascript -e "
-        tell application \"Notes\"
-            try
-                delete folder \"$TEST_FOLDER\"
-            end try
-        end tell
-    " 2>/dev/null || true
 }
 
 # ── Build ────────────────────────────────────────────────────────────────────
@@ -158,28 +147,14 @@ assert_rc 0 "help: exits 0"
 run "$CIDER" notes --help
 assert_contains "edit" "notes help: shows subcommands"
 
-# ── Check AppleScript access ────────────────────────────────────────────────
+# ── Check framework access ───────────────────────────────────────────────────
 
-log "Checking AppleScript/Notes access..."
-AS_WORKS=true
-if ! osascript -e 'tell application "Notes" to count of every note' &>/dev/null; then
-    AS_WORKS=false
-    skip "applescript" "Notes automation not available (CI without permissions?)"
-fi
+log "Checking Notes framework access..."
+run "$CIDER" notes list
+if [ $RC -ne 0 ]; then
+    skip "framework" "Notes framework not available (missing NotesShared.framework?)"
 
-if [ "$AS_WORKS" = false ]; then
-    # Can still test compile, help, error handling
-    log "AppleScript unavailable — running limited tests only"
-
-    run "$CIDER" notes list
-    # Should work (Core Data) or fail gracefully
-    if [ $RC -eq 0 ]; then
-        pass "list: runs without AppleScript"
-    else
-        skip "list" "Core Data access also unavailable"
-    fi
-
-    # Error handling tests
+    # Error handling tests still work
     run "$CIDER" notes show 99999
     assert_rc 1 "show: nonexistent note returns error"
 
@@ -187,13 +162,12 @@ if [ "$AS_WORKS" = false ]; then
     assert_rc 1 "replace: nonexistent note returns error"
 
     run "$CIDER" notes detach 99999 1
-    # detach prints to stderr but may not set exit code
     assert_contains "not found" "detach: nonexistent note shows error"
 
     # Print report and exit
     printf "\n"
     printf "═══════════════════════════════════════════════════════\n"
-    printf "  CIDER TEST REPORT (limited — no AppleScript access)\n"
+    printf "  CIDER TEST REPORT (limited — no framework access)\n"
     printf "═══════════════════════════════════════════════════════\n"
     for r in "${RESULTS[@]}"; do
         echo "  $r"
@@ -203,6 +177,7 @@ if [ "$AS_WORKS" = false ]; then
     printf "═══════════════════════════════════════════════════════\n"
     exit $FAIL
 fi
+pass "framework: Notes database accessible"
 
 # ── Setup: Create test notes ────────────────────────────────────────────────
 
@@ -219,7 +194,7 @@ create_note "CiderTest Gamma" "Gamma note for editing and replacing text."
 create_note "CiderTest Delta" "Delta note that will be deleted."
 create_note "CiderTest Attach" "Attachment test. BEFORE_ATTACH and AFTER_ATTACH markers."
 
-sleep 4  # Let Notes sync/index (Core Data search needs time)
+sleep 1  # Brief pause for any background indexing
 
 # ── Test: notes list ─────────────────────────────────────────────────────────
 
@@ -359,36 +334,31 @@ IDX=$(find_note "CiderTest Attach")
 if [ -z "$IDX" ]; then
     fail "attach" "Could not find CiderTest Attach"
 else
-    # Create a minimal PNG test file (1x1 red pixel)
-    printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' > /tmp/cider_test_attach.png
+    # Create a test file to attach
+    echo "test attachment content" > /tmp/cider_test_attach.txt
 
-    # Attach via AppleScript (no --at)
-    run "$CIDER" notes attach "$IDX" /tmp/cider_test_attach.png
-    if echo "$OUT" | grep -qF "✓"; then
-        pass "attach: success message"
+    # Attach (uses CRDT framework — appends to end of note)
+    run "$CIDER" notes attach "$IDX" /tmp/cider_test_attach.txt
+    assert_contains "✓" "attach: success message"
 
-        sleep 2
+    sleep 1
 
-        # List attachments
-        run "$CIDER" notes attachments "$IDX"
-        assert_contains "1." "attachments: shows attached file"
+    # List attachments
+    run "$CIDER" notes attachments "$IDX"
+    assert_contains "1." "attachments: shows attached file"
 
-        run "$CIDER" notes attachments "$IDX" --json
-        assert_contains '"index":1' "attachments --json: JSON output with index"
+    run "$CIDER" notes attachments "$IDX" --json
+    assert_contains '"index":1' "attachments --json: JSON output with index"
 
-        # Detach
-        run "$CIDER" notes detach "$IDX" 1
-        assert_contains "Removed" "detach: success message"
+    # Detach
+    run "$CIDER" notes detach "$IDX" 1
+    assert_contains "Removed" "detach: success message"
 
-        # Verify attachment is gone
-        run "$CIDER" notes attachments "$IDX"
-        assert_contains "No attachments" "detach: attachment was removed"
-    else
-        skip "attach (AppleScript)" "AppleScript attach failed — testing CRDT attach instead"
-        # Skip the AppleScript-based attach/detach tests
-    fi
+    # Verify attachment is gone
+    run "$CIDER" notes attachments "$IDX"
+    assert_contains "No attachments" "detach: attachment was removed"
 
-    rm -f /tmp/cider_test_attach.png
+    rm -f /tmp/cider_test_attach.txt
 fi
 
 # ── Test: notes attach --at (CRDT positional) ───────────────────────────────
@@ -469,12 +439,8 @@ IDX=$(find_note "CiderTest Delta")
 if [ -z "$IDX" ]; then
     fail "delete" "Could not find CiderTest Delta"
 else
-    # Delete uses interactive confirmation — pipe 'y' to confirm
-    # Use a subshell to avoid pipefail issues
-    set +eo pipefail
-    OUT=$(printf 'y\n' | "$CIDER" notes delete "$IDX" 2>&1)
-    RC=$?
-    set -eo pipefail
+    # Delete uses interactive confirmation
+    run bash -c "printf 'y\n' | '$CIDER' notes delete '$IDX' 2>&1"
     if echo "$OUT" | grep -qiF "deleted"; then
         pass "delete: deleted note successfully"
     elif echo "$OUT" | grep -qiF "error"; then
@@ -484,13 +450,13 @@ else
         pass "delete: command completed (rc=$RC)"
     fi
 
-    # Verify deletion (Notes needs time to flush to SQLite)
-    sleep 8
+    # Verify deletion — framework delete is synchronous, no sleep needed
+    sleep 1
     IDX2=$(find_note "CiderTest Delta")
     if [ -z "$IDX2" ]; then
         pass "delete: note no longer in list"
     else
-        skip "delete (verify)" "Notes async indexing — note may still be cached"
+        fail "delete (verify)" "note still appears in list after deletion"
     fi
 fi
 
@@ -508,12 +474,7 @@ run "$CIDER" notes replace 99999 --find "x" --replace "y"
 assert_rc 1 "error: replace nonexistent note returns exit 1"
 
 run "$CIDER" notes attach 99999 /nonexistent/file.txt
-# AppleScript-based attach may not set exit code properly
-if [ $RC -ne 0 ]; then
-    pass "error: attach nonexistent note returns error"
-else
-    assert_matches "Error|error|not found" "error: attach nonexistent note shows error message"
-fi
+assert_matches "Error|error|not found" "error: attach nonexistent note shows error"
 
 run "$CIDER" bogus
 assert_rc 1 "error: unknown subcommand returns exit 1"
