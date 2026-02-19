@@ -5,7 +5,7 @@ CFLAGS = -framework Foundation -framework CoreData \
 TARGET = cider
 SRC    = cider.m
 
-.PHONY: all clean install
+.PHONY: all clean install test
 
 all: $(TARGET)
 
@@ -16,6 +16,9 @@ $(TARGET): $(SRC)
 install: $(TARGET)
 	cp $(TARGET) /usr/local/bin/$(TARGET)
 	@echo "Installed to /usr/local/bin/$(TARGET)"
+
+test: $(TARGET)
+	./test.sh ./$(TARGET)
 
 clean:
 	rm -f $(TARGET)

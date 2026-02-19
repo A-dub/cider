@@ -1,0 +1,29 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          clang -framework Foundation -framework CoreData \
+            -Wall -Wno-deprecated-declarations -fobjc-arc \
+            -O2 -o cider cider.m
+          echo "Build successful"
+          ./cider --version
+
+      - name: Run tests
+        run: |
+          chmod +x test.sh
+          ./test.sh ./cider
