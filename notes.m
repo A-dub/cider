@@ -1,0 +1,900 @@
+/**
+ * notes.m — All Apple Notes commands
+ */
+
+#import "cider.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive prompt helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr, "Error: note number required (stdin is not a tty)\n");
+        return 0;
+    }
+
+    cmdNotesList(folder, NO);
+
+    printf("\nEnter note number to %s: ", verb ? [verb UTF8String] : "select");
+    fflush(stdout);
+
+    char buf[32] = {0};
+    if (fgets(buf, sizeof(buf), stdin) == NULL) return 0;
+    int n = atoi(buf);
+    if (n <= 0) {
+        printf("Cancelled.\n");
+        return 0;
+    }
+    return (NSUInteger)n;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMANDS: notes
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdNotesList(NSString *folder, BOOL jsonOutput) {
+    NSArray *notes = filteredNotes(folder);
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < notes.count; i++) {
+            id note = notes[i];
+            NSString *t = jsonEscapeString(noteTitle(note));
+            NSString *f = jsonEscapeString(folderName(note));
+            NSUInteger ac = noteAttachmentCount(note);
+            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\",\"attachments\":%lu}%s\n",
+                   (unsigned long)(i + 1),
+                   [t UTF8String],
+                   [f UTF8String],
+                   (unsigned long)ac,
+                   (i + 1 < notes.count) ? "," : "");
+        }
+        printf("]\n");
+        return;
+    }
+
+    printf("  # %-42s %-22s %s\n",
+           "Title", "Folder", "Attachments");
+    printf("--- %-42s %-22s %s\n",
+           "------------------------------------------",
+           "----------------------",
+           "-----------");
+
+    if (notes.count == 0) {
+        if (folder) {
+            printf("  (no notes in folder \"%s\")\n", [folder UTF8String]);
+        } else {
+            printf("  (no notes)\n");
+        }
+        return;
+    }
+
+    NSUInteger i = 1;
+    for (id note in notes) {
+        NSString *t = truncStr(noteTitle(note), 42);
+        NSString *f = truncStr(folderName(note), 22);
+        NSUInteger ac = noteAttachmentCount(note);
+        NSString *atts = ac > 0 ? [NSString stringWithFormat:@"📎 %lu", ac] : @"";
+
+        printf("%3lu %-42s %-22s %s\n",
+               (unsigned long)i,
+               [padRight(t, 42) UTF8String],
+               [padRight(f, 22) UTF8String],
+               [atts UTF8String]);
+        i++;
+    }
+    printf("\nTotal: %lu note(s)\n", (unsigned long)notes.count);
+}
+
+void cmdFoldersList(BOOL jsonOutput) {
+    NSArray *folders = fetchFolders();
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < folders.count; i++) {
+            id folder = folders[i];
+            id titleVal = [folder valueForKey:@"title"];
+            NSString *name = (titleVal && [titleVal isKindOfClass:[NSString class]])
+                ? (NSString *)titleVal : @"(unnamed)";
+            id parent = [folder valueForKey:@"parent"];
+            NSString *parentName = @"";
+            if (parent) {
+                id pTitleVal = [parent valueForKey:@"title"];
+                if (pTitleVal && [pTitleVal isKindOfClass:[NSString class]])
+                    parentName = (NSString *)pTitleVal;
+            }
+            printf("  {\"name\":\"%s\",\"parent\":\"%s\"}%s\n",
+                   [jsonEscapeString(name) UTF8String],
+                   [jsonEscapeString(parentName) UTF8String],
+                   (i + 1 < folders.count) ? "," : "");
+        }
+        printf("]\n");
+        return;
+    }
+
+    printf("Folders:\n");
+    for (id folder in folders) {
+        id titleVal = [folder valueForKey:@"title"];
+        NSString *name = (titleVal && [titleVal isKindOfClass:[NSString class]])
+            ? (NSString *)titleVal : @"(unnamed)";
+        id parent = [folder valueForKey:@"parent"];
+        if (parent) {
+            id pTitleVal = [parent valueForKey:@"title"];
+            NSString *pname = (pTitleVal && [pTitleVal isKindOfClass:[NSString class]])
+                ? (NSString *)pTitleVal : @"";
+            printf("  %s / %s\n", [pname UTF8String], [name UTF8String]);
+        } else {
+            printf("  %s\n", [name UTF8String]);
+        }
+    }
+    printf("\nTotal: %lu folder(s)\n", (unsigned long)folders.count);
+}
+
+int cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *t = noteTitle(note);
+    NSString *f = folderName(note);
+    NSArray *names = noteAttachmentNames(note);
+    NSUInteger ac = names.count;
+    NSString *body = noteTextForDisplay(note);
+
+    if (jsonOutput) {
+        NSMutableString *jsonNames = [NSMutableString stringWithString:@"["];
+        for (NSUInteger i = 0; i < names.count; i++) {
+            [jsonNames appendFormat:@"\"%@\"%@",
+             jsonEscapeString(names[i]),
+             (i + 1 < names.count) ? @"," : @""];
+        }
+        [jsonNames appendString:@"]"];
+        printf("{\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\","
+               "\"attachments\":%lu,\"attachment_names\":%s,\"body\":\"%s\"}\n",
+               (unsigned long)idx,
+               [jsonEscapeString(t) UTF8String],
+               [jsonEscapeString(f) UTF8String],
+               (unsigned long)ac,
+               [jsonNames UTF8String],
+               [jsonEscapeString(body) UTF8String]);
+        return 0;
+    }
+
+    printf("╔══════════════════════════════════════════╗\n");
+    printf("  %s\n", [t UTF8String]);
+    printf("  Folder: %s", [f UTF8String]);
+    if (ac > 0) {
+        printf(" | 📎 %lu attachment(s): ", (unsigned long)ac);
+        for (NSString *n in names) printf("%s ", [n UTF8String]);
+    }
+    printf("\n╚══════════════════════════════════════════╝\n\n");
+
+    printf("%s\n", [body UTF8String]);
+    return 0;
+}
+
+void cmdNotesAdd(NSString *folderArg) {
+    NSString *content = nil;
+
+    if (!isatty(STDIN_FILENO)) {
+        NSData *data = [[NSFileHandle fileHandleWithStandardInput]
+                        readDataToEndOfFile];
+        content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    } else {
+        NSString *tmp = [NSTemporaryDirectory()
+                         stringByAppendingPathComponent:@"cider_new.txt"];
+        [@"" writeToFile:tmp atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+        NSString *editor = [[[NSProcessInfo processInfo] environment]
+                            objectForKey:@"EDITOR"] ?: @"vi";
+        system([[NSString stringWithFormat:@"%@ %@", editor, tmp] UTF8String]);
+
+        NSError *err = nil;
+        content = [NSString stringWithContentsOfFile:tmp
+                                            encoding:NSUTF8StringEncoding
+                                               error:&err];
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+    }
+
+    if (!content || [[content stringByTrimmingCharactersInSet:
+                      [NSCharacterSet whitespaceAndNewlineCharacterSet]] length] == 0) {
+        printf("Aborted: empty note.\n");
+        return;
+    }
+
+    id folder = folderArg
+        ? findOrCreateFolder(folderArg, YES)
+        : defaultFolder();
+    if (!folder) {
+        fprintf(stderr, "Error: Could not find or create folder\n");
+        return;
+    }
+    id account = [folder valueForKey:@"account"];
+
+    id newNote = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICNote"
+                 inManagedObjectContext:g_moc];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newNote, NSSelectorFromString(@"setFolder:"), folder);
+    if (account) {
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            newNote, NSSelectorFromString(@"setAccount:"), account);
+    }
+    [newNote setValue:[NSDate date] forKey:@"creationDate"];
+    [newNote setValue:[NSDate date] forKey:@"modificationDate"];
+
+    id noteDataEntity = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICNoteData"
+                 inManagedObjectContext:g_moc];
+    [newNote setValue:noteDataEntity forKey:@"noteData"];
+
+    id mergeStr = noteMergeableString(newNote);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for new note\n");
+        [g_moc rollback];
+        return;
+    }
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertString:atIndex:"),
+        content, (NSUInteger)0);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        newNote, NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(
+        newNote, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    if (saveContext()) {
+        NSString *t = noteTitle(newNote);
+        printf("Created note: \"%s\"\n", [t UTF8String]);
+    } else {
+        fprintf(stderr, "Error: Failed to save new note\n");
+    }
+}
+
+void cmdNotesEdit(NSUInteger idx) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    NSArray *names = noteAttachmentNames(note);
+    NSString *rawText = noteRawText(note);
+    NSString *editText = rawTextToEditable(rawText, names);
+
+    NSString *newRaw = nil;
+
+    if (!isatty(STDIN_FILENO)) {
+        NSData *data = [[NSFileHandle fileHandleWithStandardInput]
+                        readDataToEndOfFile];
+        NSString *piped = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if (!piped || [[piped stringByTrimmingCharactersInSet:
+                        [NSCharacterSet whitespaceAndNewlineCharacterSet]] length] == 0) {
+            printf("Aborted: empty input.\n");
+            return;
+        }
+        newRaw = editableToRawText(piped);
+    } else {
+        printf("Editing: \"%s\"\n", [t UTF8String]);
+        if (names.count > 0) {
+            printf("⚠️  Note has %lu attachment(s). Do NOT remove or rename the "
+                   "%%%%ATTACHMENT_N_...%%%% markers.\n",
+                   (unsigned long)names.count);
+            for (NSUInteger i = 0; i < names.count; i++) {
+                printf("   [%lu] %s\n", (unsigned long)i, [names[i] UTF8String]);
+            }
+        }
+
+        NSString *tmp = [NSTemporaryDirectory()
+                         stringByAppendingPathComponent:@"cider_edit.txt"];
+        NSError *writeErr = nil;
+        [editText writeToFile:tmp
+                   atomically:YES
+                     encoding:NSUTF8StringEncoding
+                        error:&writeErr];
+        if (writeErr) {
+            fprintf(stderr, "Error writing temp file: %s\n",
+                    [[writeErr localizedDescription] UTF8String]);
+            return;
+        }
+
+        NSString *editor = [[[NSProcessInfo processInfo] environment]
+                            objectForKey:@"EDITOR"] ?: @"vi";
+        int ret = system([[NSString stringWithFormat:@"%@ %@", editor, tmp] UTF8String]);
+        if (ret != 0) {
+            fprintf(stderr, "Editor returned error (%d)\n", ret);
+            [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+            return;
+        }
+
+        NSError *readErr = nil;
+        NSString *edited = [NSString stringWithContentsOfFile:tmp
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:&readErr];
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+
+        if (!edited) {
+            fprintf(stderr, "Error reading temp file: %s\n",
+                    [[readErr localizedDescription] UTF8String]);
+            return;
+        }
+
+        newRaw = editableToRawText(edited);
+    }
+
+    NSUInteger origCount = 0, newCount = 0;
+    for (NSUInteger i = 0; i < [rawText length]; i++)
+        if ([rawText characterAtIndex:i] == ATTACHMENT_MARKER) origCount++;
+    for (NSUInteger i = 0; i < [newRaw length]; i++)
+        if ([newRaw characterAtIndex:i] == ATTACHMENT_MARKER) newCount++;
+
+    if (origCount != newCount) {
+        fprintf(stderr,
+                "Warning: attachment count changed (%lu → %lu). "
+                "Markers should not be added or removed.\n",
+                (unsigned long)origCount, (unsigned long)newCount);
+    }
+
+    if (!applyCRDTEdit(note, rawText, newRaw)) return;
+
+    if (saveContext()) {
+        printf("✓ Note saved (CRDT, attachments preserved).\n");
+    } else {
+        fprintf(stderr, "Error: save failed\n");
+    }
+}
+
+int cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *rawText = noteRawText(note);
+    NSRange found = [rawText rangeOfString:findStr];
+    if (found.location == NSNotFound) {
+        fprintf(stderr, "Error: Text not found in note %lu: \"%s\"\n",
+                (unsigned long)idx, [findStr UTF8String]);
+        return 1;
+    }
+
+    NSString *newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
+                                                          withString:replaceStr];
+
+    if (!applyCRDTEdit(note, rawText, newRaw)) return 1;
+
+    if (saveContext()) {
+        printf("✓ Replaced \"%s\" → \"%s\" in note %lu.\n",
+               [findStr UTF8String], [replaceStr UTF8String], (unsigned long)idx);
+        return 0;
+    } else {
+        fprintf(stderr, "Error: save failed\n");
+        return 1;
+    }
+}
+
+void cmdNotesDelete(NSUInteger idx) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    printf("Delete note \"%s\"? (y/N) ", [t UTF8String]);
+    fflush(stdout);
+
+    char buf[8] = {0};
+    if (fgets(buf, sizeof(buf), stdin) == NULL || (buf[0] != 'y' && buf[0] != 'Y')) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"deleteFromLocalDatabase"));
+
+    if (saveContext()) {
+        printf("Deleted: \"%s\"\n", [t UTF8String]);
+    } else {
+        fprintf(stderr, "Error: Failed to delete note\n");
+    }
+}
+
+void cmdNotesMove(NSUInteger idx, NSString *targetFolderName) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    id folder = findOrCreateFolder(targetFolderName, YES);
+    if (!folder) {
+        fprintf(stderr, "Error: Could not find or create folder \"%s\"\n",
+                [targetFolderName UTF8String]);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"setFolder:"), folder);
+    [note setValue:[NSDate date] forKey:@"modificationDate"];
+
+    if (saveContext()) {
+        printf("Moved \"%s\" → \"%s\"\n", [t UTF8String],
+               [targetFolderName UTF8String]);
+    } else {
+        fprintf(stderr, "Error: Failed to move note\n");
+    }
+}
+
+void cmdNotesSearch(NSString *query, BOOL jsonOutput) {
+    NSPredicate *pred = [NSPredicate predicateWithFormat:
+        @"(title CONTAINS[cd] %@) OR (snippet CONTAINS[cd] %@)",
+        query, query];
+    NSArray *results = fetchNotes(pred);
+
+    if (!results || results.count == 0) {
+        if (jsonOutput) {
+            printf("[]\n");
+        } else {
+            printf("No notes found matching \"%s\"\n", [query UTF8String]);
+        }
+        return;
+    }
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < results.count; i++) {
+            id note = results[i];
+            NSString *t = jsonEscapeString(noteTitle(note));
+            NSString *f = jsonEscapeString(folderName(note));
+            NSUInteger ac = noteAttachmentCount(note);
+            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\",\"attachments\":%lu}%s\n",
+                   (unsigned long)(i + 1),
+                   [t UTF8String],
+                   [f UTF8String],
+                   (unsigned long)ac,
+                   (i + 1 < results.count) ? "," : "");
+        }
+        printf("]\n");
+        return;
+    }
+
+    printf("Found %lu note(s) matching \"%s\":\n\n",
+           (unsigned long)results.count, [query UTF8String]);
+    printf("  # %-42s %-22s\n", "Title", "Folder");
+    printf("--- %-42s %-22s\n",
+           "------------------------------------------",
+           "----------------------");
+
+    NSUInteger i = 1;
+    for (id note in results) {
+        NSString *t = truncStr(noteTitle(note), 42);
+        NSString *f = truncStr(folderName(note), 22);
+        printf("%3lu %-42s %-22s\n",
+               (unsigned long)i,
+               [padRight(t, 42) UTF8String],
+               [padRight(f, 22) UTF8String]);
+        i++;
+    }
+}
+
+void cmdNotesExport(NSString *exportPath) {
+    NSArray *notes = fetchAllNotes();
+    if (!notes || notes.count == 0) {
+        printf("No notes to export.\n");
+        return;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *mkErr = nil;
+    [fm createDirectoryAtPath:exportPath
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:&mkErr];
+    if (mkErr) {
+        fprintf(stderr, "Error creating export directory: %s\n",
+                [[mkErr localizedDescription] UTF8String]);
+        return;
+    }
+
+    NSMutableString *index = [NSMutableString stringWithFormat:
+        @"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        @"<title>Notes Export</title><style>"
+        @"body{font-family:-apple-system,sans-serif;max-width:900px;margin:40px auto;padding:0 20px}"
+        @"h1{color:#1d1d1f}a{color:#0066cc;text-decoration:none}"
+        @"a:hover{text-decoration:underline}"
+        @"li{margin:8px 0}.folder{color:#888;font-size:.85em}"
+        @"</style></head><body><h1>📝 Notes Export</h1><ul>\n"];
+
+    NSUInteger i = 1;
+    for (id note in notes) {
+        NSString *t = noteTitle(note);
+        NSString *f = folderName(note);
+        NSString *body = noteTextForDisplay(note);
+
+        NSMutableString *safeTitle = [NSMutableString stringWithString:t];
+        NSCharacterSet *unsafe = [NSCharacterSet
+            characterSetWithCharactersInString:@"/\\:*?\"<>|"];
+        NSArray *parts = [safeTitle componentsSeparatedByCharactersInSet:unsafe];
+        safeTitle = [NSMutableString stringWithString:[parts componentsJoinedByString:@"-"]];
+        if ([safeTitle length] > 50) [safeTitle deleteCharactersInRange:NSMakeRange(50, [safeTitle length] - 50)];
+
+        NSString *filename = [NSString stringWithFormat:@"%04lu_%@.html",
+                              (unsigned long)i, safeTitle];
+        NSString *filePath = [exportPath stringByAppendingPathComponent:filename];
+
+        NSString *(^htmlEsc)(NSString *) = ^NSString *(NSString *s) {
+            s = [s stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
+            s = [s stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
+            s = [s stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+            s = [s stringByReplacingOccurrencesOfString:@"\n" withString:@"<br>\n"];
+            return s;
+        };
+
+        NSString *eT = htmlEsc(t);
+        NSString *eF = htmlEsc(f);
+        NSString *eBody = htmlEsc(body);
+        NSString *html = [NSString stringWithFormat:
+            @"<!DOCTYPE html><html><head><meta charset='utf-8'><title>%@</title><style>"
+            @"body{font-family:-apple-system,sans-serif;max-width:900px;margin:40px auto;padding:0 20px}"
+            @"h1{color:#1d1d1f}.folder{color:#888;font-size:.9em}"
+            @"pre{white-space:pre-wrap;background:#f5f5f7;padding:20px;border-radius:10px;line-height:1.6}"
+            @"</style></head><body>"
+            @"<h1>%@</h1><p class='folder'>&#x1F4C1; %@</p><pre>%@</pre>"
+            @"</body></html>",
+            eT, eT, eF, eBody];
+
+        [html writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+        [index appendFormat:@"<li><a href='%@'>%@</a> "
+                            @"<span class='folder'>&#x1F4C1; %@</span></li>\n",
+                            filename, t, f];
+        i++;
+    }
+
+    [index appendString:@"</ul><p><em>Exported by cider v" VERSION "</em></p></body></html>"];
+    NSString *indexPath = [exportPath stringByAppendingPathComponent:@"index.html"];
+    [index writeToFile:indexPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    printf("Exported %lu notes to: %s\n",
+           (unsigned long)(i - 1), [exportPath UTF8String]);
+    printf("Index:    %s\n", [indexPath UTF8String]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Attachment helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSArray *attachmentOrderFromCRDT(id note) {
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) return nil;
+
+    NSString *raw = noteRawText(note);
+    NSMutableArray *ordered = [NSMutableArray array];
+
+    id attrString = nil;
+    @try {
+        attrString = ((id (*)(id, SEL))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"attributedString"));
+    }
+    @catch (NSException *e) { return nil; }
+    if (!attrString) return nil;
+
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        if ([raw characterAtIndex:i] != ATTACHMENT_MARKER) continue;
+        NSString *attID = nil;
+        @try {
+            NSRange effRange;
+            NSDictionary *attrs = [(NSAttributedString *)attrString
+                attributesAtIndex:i effectiveRange:&effRange];
+            id ttAtt = attrs[@"NSAttachment"];
+            if (ttAtt) {
+                attID = ((id (*)(id, SEL))objc_msgSend)(
+                    ttAtt, NSSelectorFromString(@"attachmentIdentifier"));
+            }
+        }
+        @catch (NSException *e) {}
+        [ordered addObject:attID ?: (id)[NSNull null]];
+    }
+    return ordered;
+}
+
+NSString *attachmentNameByID(NSArray *atts, NSString *attID) {
+    if (!attID || !atts) return @"attachment";
+    for (id att in atts) {
+        NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+            att, NSSelectorFromString(@"identifier"));
+        if (![ident isEqualToString:attID]) continue;
+        id ut = [att valueForKey:@"userTitle"];
+        if (ut && [ut isKindOfClass:[NSString class]] && [(NSString *)ut length] > 0)
+            return (NSString *)ut;
+        id t = [att valueForKey:@"title"];
+        if (t && [t isKindOfClass:[NSString class]] && [(NSString *)t length] > 0)
+            return (NSString *)t;
+        id uti = [att valueForKey:@"typeUTI"];
+        if (uti && [uti isKindOfClass:[NSString class]])
+            return [NSString stringWithFormat:@"[%@]", uti];
+        return @"attachment";
+    }
+    return @"attachment";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Attachment commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdNotesAttachments(NSUInteger idx, BOOL jsonOut) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSArray *orderedIDs = attachmentOrderFromCRDT(note);
+    NSArray *atts = attachmentsAsArray(noteVisibleAttachments(note));
+    NSString *raw = noteRawText(note);
+
+    NSMutableArray *markerPositions = [NSMutableArray array];
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        if ([raw characterAtIndex:i] == ATTACHMENT_MARKER)
+            [markerPositions addObject:@(i)];
+    }
+
+    NSUInteger count = orderedIDs ? orderedIDs.count : 0;
+
+    if (jsonOut) {
+        printf("[");
+        for (NSUInteger i = 0; i < count; i++) {
+            id val = orderedIDs[i];
+            NSString *attID = (val != [NSNull null]) ? val : nil;
+            NSString *name = attID ? attachmentNameByID(atts, attID) : @"attachment";
+            NSString *uti = @"unknown";
+            NSUInteger pos = (i < markerPositions.count)
+                ? [markerPositions[i] unsignedIntegerValue] : 0;
+            if (attID) {
+                for (id att in atts) {
+                    NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+                        att, NSSelectorFromString(@"identifier"));
+                    if ([ident isEqualToString:attID]) {
+                        id u = [att valueForKey:@"typeUTI"];
+                        if (u) uti = u;
+                        break;
+                    }
+                }
+            }
+            printf("%s{\"index\":%lu,\"name\":\"%s\",\"type\":\"%s\",\"position\":%lu,\"id\":\"%s\"}",
+                   i > 0 ? "," : "",
+                   (unsigned long)(i + 1),
+                   [name UTF8String],
+                   [uti UTF8String],
+                   (unsigned long)pos,
+                   attID ? [attID UTF8String] : "");
+        }
+        printf("]\n");
+    } else {
+        NSString *title = noteTitle(note);
+        if (count == 0) {
+            printf("No attachments in \"%s\"\n", [title UTF8String]);
+            return;
+        }
+        printf("Attachments in \"%s\":\n", [title UTF8String]);
+        for (NSUInteger i = 0; i < count; i++) {
+            id val = orderedIDs[i];
+            NSString *attID = (val != [NSNull null]) ? val : nil;
+            NSString *name = attID ? attachmentNameByID(atts, attID) : @"attachment";
+            NSString *uti = @"unknown";
+            NSUInteger pos = (i < markerPositions.count)
+                ? [markerPositions[i] unsignedIntegerValue] : 0;
+            if (attID) {
+                for (id att in atts) {
+                    NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+                        att, NSSelectorFromString(@"identifier"));
+                    if ([ident isEqualToString:attID]) {
+                        id u = [att valueForKey:@"typeUTI"];
+                        if (u) uti = u;
+                        break;
+                    }
+                }
+            }
+            printf("  %lu. %s  (%s, position %lu)\n",
+                   (unsigned long)(i + 1),
+                   [name UTF8String],
+                   [uti UTF8String],
+                   (unsigned long)pos);
+        }
+    }
+}
+
+void cmdNotesAttach(NSUInteger idx, NSString *filePath) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *absPath = [filePath hasPrefix:@"/"]
+        ? filePath
+        : [[[NSFileManager defaultManager] currentDirectoryPath]
+           stringByAppendingPathComponent:filePath];
+
+    if (![[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+        fprintf(stderr, "Error: File not found: %s\n", [absPath UTF8String]);
+        return;
+    }
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for note\n");
+        return;
+    }
+    NSUInteger textLen = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"length"));
+
+    cmdNotesAttachAt(idx, filePath, textLen);
+}
+
+void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *absPath = [filePath hasPrefix:@"/"]
+        ? filePath
+        : [[[NSFileManager defaultManager] currentDirectoryPath]
+           stringByAppendingPathComponent:filePath];
+
+    if (![[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+        fprintf(stderr, "Error: File not found: %s\n", [absPath UTF8String]);
+        return;
+    }
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for note\n");
+        return;
+    }
+
+    NSUInteger textLen = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"length"));
+    if (position > textLen) {
+        fprintf(stderr, "Error: Position %lu out of range (note length: %lu)\n",
+                (unsigned long)position, (unsigned long)textLen);
+        return;
+    }
+
+    NSURL *fileURL = [NSURL fileURLWithPath:absPath];
+    id attachment = ((id (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"addAttachmentWithFileURL:"), fileURL);
+    if (!attachment) {
+        fprintf(stderr, "Error: addAttachmentWithFileURL: returned nil\n");
+        return;
+    }
+
+    NSString *attID = ((id (*)(id, SEL))objc_msgSend)(
+        attachment, NSSelectorFromString(@"identifier"));
+    NSString *attUTI = ((id (*)(id, SEL))objc_msgSend)(
+        attachment, NSSelectorFromString(@"typeUTI"));
+
+    Class TTAttClass = NSClassFromString(@"ICTTAttachment");
+    id ttAtt = [[TTAttClass alloc] init];
+    ((void (*)(id, SEL, id))objc_msgSend)(ttAtt, NSSelectorFromString(@"setAttachmentIdentifier:"), attID);
+    ((void (*)(id, SEL, id))objc_msgSend)(ttAtt, NSSelectorFromString(@"setAttachmentUTI:"), attUTI);
+
+    unichar marker = ATTACHMENT_MARKER;
+    NSString *markerStr = [NSString stringWithCharacters:&marker length:1];
+    NSDictionary *attrs = @{@"NSAttachment": ttAtt};
+    NSAttributedString *attAttrStr = [[NSAttributedString alloc] initWithString:markerStr attributes:attrs];
+
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertAttributedString:atIndex:"), attAttrStr, position);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+    NSError *saveErr = nil;
+    [g_moc save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n", [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    printf("✓ Attachment inserted at position %lu in \"%s\" (id: %s)\n",
+           (unsigned long)position, [t UTF8String], [attID UTF8String]);
+}
+
+void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx) {
+    id note = noteAtIndex(idx, nil);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *raw = noteRawText(note);
+    NSMutableArray *markerPositions = [NSMutableArray array];
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        if ([raw characterAtIndex:i] == ATTACHMENT_MARKER) {
+            [markerPositions addObject:@(i)];
+        }
+    }
+
+    if (markerPositions.count == 0) {
+        fprintf(stderr, "Error: Note has no inline attachments\n");
+        return;
+    }
+
+    if (attIdx >= markerPositions.count) {
+        fprintf(stderr, "Error: Attachment index %lu out of range (note has %lu inline attachment(s))\n",
+                (unsigned long)(attIdx + 1), (unsigned long)markerPositions.count);
+        return;
+    }
+
+    NSUInteger charPos = [markerPositions[attIdx] unsignedIntegerValue];
+
+    NSArray *orderedIDs = attachmentOrderFromCRDT(note);
+    NSString *targetAttID = nil;
+    if (orderedIDs && attIdx < orderedIDs.count) {
+        id val = orderedIDs[attIdx];
+        if (val != [NSNull null]) targetAttID = val;
+    }
+
+    NSArray *atts = attachmentsAsArray(noteVisibleAttachments(note));
+
+    NSString *removedName = targetAttID
+        ? attachmentNameByID(atts, targetAttID) : @"attachment";
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return;
+    }
+
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, NSRange))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"deleteCharactersInRange:"),
+        NSMakeRange(charPos, 1));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    BOOL deletedEntity = NO;
+    if (targetAttID) {
+        for (id att in atts) {
+            NSString *attID = ((id (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"identifier"));
+            if ([attID isEqualToString:targetAttID]) {
+                [g_moc deleteObject:att];
+                deletedEntity = YES;
+                break;
+            }
+        }
+    }
+
+    if (!deletedEntity) {
+        fprintf(stderr, "Warning: Could not identify attachment entity to delete "
+                "(CRDT marker removed but entity may be orphaned)\n");
+    }
+
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+    NSError *saveErr = nil;
+    [g_moc save:&saveErr];
+    if (saveErr) {
+        fprintf(stderr, "Error saving: %s\n", [[saveErr localizedDescription] UTF8String]);
+        return;
+    }
+
+    NSString *t = noteTitle(note);
+    printf("✓ Removed attachment %lu (%s) from \"%s\"\n",
+           (unsigned long)(attIdx + 1), [removedName UTF8String], [t UTF8String]);
+}

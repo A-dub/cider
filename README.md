@@ -176,6 +176,24 @@ cider rem complete 1
 cider rem delete 2
 ```
 
+### Sync (Notes <-> Markdown)
+
+```bash
+# One sync cycle — auto-initializes (backup + export) on first run
+cider sync run
+
+# Continuous sync daemon (polls every 2 seconds)
+cider sync watch
+
+# Custom sync directory and interval
+cider sync watch --dir ~/my-notes --interval 5
+
+# Manual backup of the Notes database
+cider sync backup
+```
+
+Sync mirrors Apple Notes to local Markdown files with YAML frontmatter and extracts attachments. Pre-existing notes are read-only (`editable: false`); new Markdown files create editable notes. See [SYNC.md](SYNC.md) for full documentation and [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md) for backup restoration.
+
 ## How Editing Works
 
 When you run `cider notes edit 3`:
@@ -216,6 +234,7 @@ cider notes replace 3 --find "old text" --replace "new text"
 | **Delete** | `deleteFromLocalDatabase` (framework) |
 | **Move** | `setFolder:` (framework) |
 | **Attach / Detach** | CRDT API (`addAttachmentWithFileURL:` + attributed string) |
+| **Sync** | Bidirectional Notes <-> Markdown with SHA-256 change detection |
 | **Reminders** | `NSAppleScript` (Reminders.app — only remaining AppleScript user) |
 
 All Notes operations use the private framework directly — no AppleScript, no Notes.app process needed. Single Objective-C file. No external dependencies. Compiles in under a second.

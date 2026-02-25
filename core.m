@@ -1,0 +1,479 @@
+/**
+ * core.m — Framework initialization, Core Data, CRDT, and utility helpers
+ */
+
+#import "cider.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global state
+// ─────────────────────────────────────────────────────────────────────────────
+
+id g_ctx = nil;
+id g_moc = nil;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Framework init
+// ─────────────────────────────────────────────────────────────────────────────
+
+BOOL initNotesContext(void) {
+    void *handle = dlopen(
+        "/System/Library/PrivateFrameworks/NotesShared.framework/NotesShared",
+        RTLD_NOW);
+    if (!handle) {
+        fprintf(stderr, "Error: Could not load NotesShared.framework: %s\n",
+                dlerror());
+        return NO;
+    }
+
+    Class NoteContext = NSClassFromString(@"ICNoteContext");
+    if (!NoteContext) {
+        fprintf(stderr, "Error: ICNoteContext class not found. "
+                "Is this macOS with Apple Notes?\n");
+        return NO;
+    }
+
+    ((void (*)(id, SEL, NSUInteger))objc_msgSend)(
+        NoteContext,
+        NSSelectorFromString(@"startSharedContextWithOptions:"),
+        0);
+
+    g_ctx = ((id (*)(id, SEL))objc_msgSend)(
+        NoteContext, NSSelectorFromString(@"sharedContext"));
+    if (!g_ctx) {
+        fprintf(stderr, "Error: Could not get shared ICNoteContext\n");
+        return NO;
+    }
+
+    g_moc = ((id (*)(id, SEL))objc_msgSend)(
+        g_ctx, NSSelectorFromString(@"managedObjectContext"));
+    if (!g_moc) {
+        fprintf(stderr, "Error: Could not get managed object context\n");
+        return NO;
+    }
+
+    // Verify we can actually read from the store (detect Full Disk Access issues)
+    NSFetchRequest *testReq = [NSFetchRequest fetchRequestWithEntityName:@"ICNote"];
+    testReq.fetchLimit = 1;
+    NSError *testErr = nil;
+    NSArray *testResult = [g_moc executeFetchRequest:testReq error:&testErr];
+    if (testErr || !testResult) {
+        NSString *errDesc = [testErr localizedDescription] ?: @"unknown error";
+        if ([errDesc containsString:@"256"] ||
+            [errDesc containsString:@"couldn't be opened"] ||
+            [errDesc containsString:@"failure to access"]) {
+            fprintf(stderr,
+                "\n"
+                "Error: Cannot access the Notes database.\n"
+                "\n"
+                "This is usually a macOS permissions issue. To fix it:\n"
+                "\n"
+                "  1. Open System Settings → Privacy & Security → Full Disk Access\n"
+                "  2. Click + and add your terminal app\n"
+                "     (Terminal.app, iTerm, Warp, etc.)\n"
+                "  3. Restart your terminal\n"
+                "\n");
+        } else {
+            fprintf(stderr, "Error: Failed to read Notes database: %s\n",
+                    [errDesc UTF8String]);
+        }
+        return NO;
+    }
+
+    return YES;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core Data helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSArray *fetchNotes(NSPredicate *predicate) {
+    NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICNote"];
+    NSPredicate *notDeleted = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
+    req.predicate = predicate
+        ? [NSCompoundPredicate andPredicateWithSubpredicates:@[notDeleted, predicate]]
+        : notDeleted;
+    req.sortDescriptors = @[
+        [NSSortDescriptor sortDescriptorWithKey:@"modificationDate"
+                                      ascending:NO]
+    ];
+    NSError *err = nil;
+    NSArray *results = [g_moc executeFetchRequest:req error:&err];
+    if (err) {
+        fprintf(stderr, "Fetch error: %s\n", [[err localizedDescription] UTF8String]);
+        return nil;
+    }
+    return results ?: @[];
+}
+
+NSArray *fetchAllNotes(void) {
+    return fetchNotes([NSPredicate predicateWithFormat:@"markedForDeletion == NO"]);
+}
+
+NSArray *fetchFolders(void) {
+    NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    req.predicate = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
+    req.sortDescriptors = @[
+        [NSSortDescriptor sortDescriptorWithKey:@"title" ascending:YES]
+    ];
+    NSError *err = nil;
+    NSArray *results = [g_moc executeFetchRequest:req error:&err];
+    if (err) {
+        fprintf(stderr, "Fetch folders error: %s\n",
+                [[err localizedDescription] UTF8String]);
+        return nil;
+    }
+    return results ?: @[];
+}
+
+id findOrCreateFolder(NSString *title, BOOL create) {
+    NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    req.predicate = [NSPredicate predicateWithFormat:@"title == %@ AND markedForDeletion == NO", title];
+    NSArray *results = [g_moc executeFetchRequest:req error:nil];
+    if (results.count > 0) return results.firstObject;
+    if (!create) return nil;
+
+    NSFetchRequest *fReq = [NSFetchRequest fetchRequestWithEntityName:@"ICFolder"];
+    fReq.predicate = [NSPredicate predicateWithFormat:@"markedForDeletion == NO"];
+    NSArray *allFolders = [g_moc executeFetchRequest:fReq error:nil];
+    id account = nil;
+    for (id f in allFolders) {
+        account = [f valueForKey:@"account"];
+        if (account) break;
+    }
+    if (!account) return nil;
+
+    id newFolder = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICFolder"
+                 inManagedObjectContext:g_moc];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newFolder, NSSelectorFromString(@"setTitle:"), title);
+    [newFolder setValue:account forKey:@"account"];
+    return newFolder;
+}
+
+id defaultFolder(void) {
+    id folder = findOrCreateFolder(@"Notes", NO);
+    if (folder) return folder;
+    NSArray *all = fetchFolders();
+    for (id f in all) {
+        NSString *t = [f valueForKey:@"title"];
+        if (t && t.length > 0) return f;
+    }
+    return nil;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Note access helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSString *noteURIString(id note) {
+    id objID = ((id (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"objectID"));
+    NSURL *uri = ((NSURL *(*)(id, SEL))objc_msgSend)(
+        objID, NSSelectorFromString(@"URIRepresentation"));
+    return [uri absoluteString];
+}
+
+NSInteger noteIntPK(id note) {
+    NSString *uri = noteURIString(note);
+    NSRange pRange = [uri rangeOfString:@"/p" options:NSBackwardsSearch];
+    if (pRange.location == NSNotFound) return -1;
+    return [[uri substringFromIndex:pRange.location + 2] integerValue];
+}
+
+NSString *noteTitle(id note) {
+    NSString *t = ((id (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"title"));
+    return t ?: @"(untitled)";
+}
+
+NSString *folderName(id note) {
+    id folder = [note valueForKey:@"folder"];
+    if (!folder) return @"Notes";
+    id title = [folder valueForKey:@"title"];
+    if (title && [title isKindOfClass:[NSString class]]) return (NSString *)title;
+    id locTitle = ((id (*)(id, SEL))objc_msgSend)(
+        folder, NSSelectorFromString(@"localizedTitle"));
+    return (locTitle && [locTitle isKindOfClass:[NSString class]])
+        ? (NSString *)locTitle : @"Notes";
+}
+
+id noteVisibleAttachments(id note) {
+    return ((id (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"visibleAttachments"));
+}
+
+NSUInteger noteAttachmentCount(id note) {
+    id atts = noteVisibleAttachments(note);
+    return atts ? [atts count] : 0;
+}
+
+NSArray *attachmentsAsArray(id attsObj) {
+    if (!attsObj) return @[];
+    if ([attsObj isKindOfClass:[NSArray class]]) return (NSArray *)attsObj;
+    if ([attsObj respondsToSelector:@selector(allObjects)]) {
+        return [(NSSet *)attsObj allObjects];
+    }
+    if ([attsObj respondsToSelector:@selector(array)]) {
+        return [(NSOrderedSet *)attsObj array];
+    }
+    return @[];
+}
+
+NSArray *noteAttachmentNames(id note) {
+    id attsObj = noteVisibleAttachments(note);
+    NSArray *atts = attachmentsAsArray(attsObj);
+    if (atts.count == 0) return @[];
+
+    NSMutableArray *names = [NSMutableArray array];
+    for (id att in atts) {
+        NSString *name = nil;
+        id ut = [att valueForKey:@"userTitle"];
+        if (ut && [ut isKindOfClass:[NSString class]] && [(NSString *)ut length] > 0) {
+            name = (NSString *)ut;
+        } else {
+            id t = [att valueForKey:@"title"];
+            if (t && [t isKindOfClass:[NSString class]] && [(NSString *)t length] > 0) {
+                name = (NSString *)t;
+            }
+        }
+        if (!name || name.length == 0) {
+            id uti = [att valueForKey:@"typeUTI"];
+            if (uti && [uti isKindOfClass:[NSString class]]) {
+                name = [NSString stringWithFormat:@"[%@]", uti];
+            } else {
+                name = @"attachment";
+            }
+        }
+        [names addObject:name];
+    }
+    return names;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRDT / mergeableString helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+id noteMergeableString(id note) {
+    return ((id (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"mergeableString"));
+}
+
+NSString *noteRawText(id note) {
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) return @"";
+
+    id attrStr = ((id (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"string"));
+    if (!attrStr) return @"";
+
+    if ([attrStr isKindOfClass:[NSAttributedString class]]) {
+        return [(NSAttributedString *)attrStr string];
+    }
+    return (NSString *)attrStr ?: @"";
+}
+
+NSString *noteTextForDisplay(id note) {
+    NSString *raw = noteRawText(note);
+    NSArray *names = noteAttachmentNames(note);
+    NSMutableString *buf = [NSMutableString stringWithCapacity:[raw length]];
+    NSUInteger ai = 0;
+
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        unichar c = [raw characterAtIndex:i];
+        if (c == ATTACHMENT_MARKER) {
+            NSString *aname = (ai < names.count) ? names[ai] : @"attachment";
+            [buf appendFormat:@"[📎 %@]", aname];
+            ai++;
+        } else {
+            [buf appendFormat:@"%C", c];
+        }
+    }
+    return buf;
+}
+
+NSString *rawTextToEditable(NSString *raw, NSArray *names) {
+    NSMutableString *buf = [NSMutableString stringWithCapacity:[raw length]];
+    NSUInteger ai = 0;
+
+    for (NSUInteger i = 0; i < [raw length]; i++) {
+        unichar c = [raw characterAtIndex:i];
+        if (c == ATTACHMENT_MARKER) {
+            NSString *aname = (ai < names.count) ? names[ai] : @"attachment";
+            [buf appendFormat:@"%%%%ATTACHMENT_%lu_%@%%%%",
+             (unsigned long)ai, aname];
+            ai++;
+        } else {
+            [buf appendFormat:@"%C", c];
+        }
+    }
+    return buf;
+}
+
+NSString *editableToRawText(NSString *edited) {
+    NSMutableString *result = [NSMutableString stringWithString:edited];
+    NSRegularExpression *regex = [NSRegularExpression
+        regularExpressionWithPattern:@"%%ATTACHMENT_\\d+_[^%]*%%"
+                             options:0
+                               error:nil];
+    NSArray *matches = [regex matchesInString:result
+                                      options:0
+                                        range:NSMakeRange(0, [result length])];
+    for (NSInteger i = (NSInteger)matches.count - 1; i >= 0; i--) {
+        NSTextCheckingResult *match = matches[(NSUInteger)i];
+        [result replaceCharactersInRange:match.range
+                              withString:@"\uFFFC"];
+    }
+    return result;
+}
+
+BOOL saveContext(void) {
+    NSError *err = nil;
+    BOOL ok = ((BOOL (*)(id, SEL, NSError **))objc_msgSend)(
+        g_ctx, NSSelectorFromString(@"save:"), &err);
+    if (!ok && !err) {
+        ok = ((BOOL (*)(id, SEL))objc_msgSend)(
+            g_ctx, NSSelectorFromString(@"save"));
+    }
+    if (err) {
+        fprintf(stderr, "Save error: %s\n",
+                [[err localizedDescription] UTF8String]);
+    }
+    return ok;
+}
+
+BOOL applyCRDTEdit(id note, NSString *oldText, NSString *newText) {
+    if ([oldText isEqualToString:newText]) {
+        printf("No changes detected.\n");
+        return YES;
+    }
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeableString for note\n");
+        return NO;
+    }
+
+    NSUInteger oldLen = [oldText length];
+    NSUInteger newLen = [newText length];
+
+    NSUInteger prefix = 0;
+    while (prefix < oldLen && prefix < newLen &&
+           [oldText characterAtIndex:prefix] ==
+               [newText characterAtIndex:prefix]) {
+        prefix++;
+    }
+
+    NSUInteger suffix = 0;
+    while (suffix < (oldLen - prefix) && suffix < (newLen - prefix) &&
+           [oldText characterAtIndex:oldLen - 1 - suffix] ==
+               [newText characterAtIndex:newLen - 1 - suffix]) {
+        suffix++;
+    }
+
+    NSRange replaceRange = NSMakeRange(prefix, oldLen - prefix - suffix);
+    NSString *replaceWith = [newText substringWithRange:
+                             NSMakeRange(prefix, newLen - prefix - suffix)];
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"beginEditing"));
+
+    ((void (*)(id, SEL, NSRange, id))objc_msgSend)(
+        mergeStr,
+        NSSelectorFromString(@"replaceCharactersInRange:withString:"),
+        replaceRange,
+        replaceWith);
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"endEditing"));
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    return YES;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Note listing helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSArray *filteredNotes(NSString *filterFolder) {
+    NSArray *all = fetchAllNotes();
+    if (!all) return @[];
+
+    NSMutableArray *result = [NSMutableArray array];
+    for (id note in all) {
+        id folder = [note valueForKey:@"folder"];
+        if (folder) {
+            BOOL isTrash = ((BOOL (*)(id, SEL))objc_msgSend)(
+                folder, NSSelectorFromString(@"isTrashFolder"));
+            if (isTrash && !filterFolder) continue;
+        }
+
+        if (!filterFolder) {
+            [result addObject:note];
+        } else {
+            NSString *fn = folderName(note);
+            if ([fn caseInsensitiveCompare:filterFolder] == NSOrderedSame) {
+                [result addObject:note];
+            }
+        }
+    }
+    return result;
+}
+
+id noteAtIndex(NSUInteger idx, NSString *folder) {
+    NSArray *notes = filteredNotes(folder);
+    if (idx == 0 || idx > notes.count) return nil;
+    return notes[idx - 1];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSString *jsonEscapeString(NSString *s) {
+    if (!s) return @"";
+    NSMutableString *r = [NSMutableString stringWithString:s];
+    [r replaceOccurrencesOfString:@"\\" withString:@"\\\\" options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\"" withString:@"\\\"" options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\n" withString:@"\\n"  options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\r" withString:@"\\r"  options:0 range:NSMakeRange(0, r.length)];
+    [r replaceOccurrencesOfString:@"\t" withString:@"\\t"  options:0 range:NSMakeRange(0, r.length)];
+    return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AppleScript helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSAppleEventDescriptor *runAppleScript(NSString *src, NSString **errMsg) {
+    NSDictionary *err = nil;
+    NSAppleScript *as = [[NSAppleScript alloc] initWithSource:src];
+    NSAppleEventDescriptor *res = [as executeAndReturnError:&err];
+    if (!res && errMsg) {
+        *errMsg = [err[@"NSAppleScriptErrorMessage"]
+                   ?: [err description] ?: @"Unknown AppleScript error"
+                   copy];
+    }
+    return res;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Column formatting helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSString *truncStr(NSString *s, NSUInteger maxLen) {
+    if ([s length] <= maxLen) return s;
+    return [[s substringToIndex:maxLen - 2] stringByAppendingString:@".."];
+}
+
+NSString *padRight(NSString *s, NSUInteger width) {
+    if ([s length] >= width) return [s substringToIndex:width];
+    NSMutableString *padded = [NSMutableString stringWithString:s];
+    while ([padded length] < width) [padded appendString:@" "];
+    return padded;
+}

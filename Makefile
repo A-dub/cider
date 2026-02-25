@@ -3,13 +3,13 @@ CFLAGS = -framework Foundation -framework CoreData \
          -Wall -Wno-deprecated-declarations \
          -fobjc-arc
 TARGET = cider
-SRC    = cider.m
+SRC    = main.m core.m notes.m reminders.m sync.m
 
-.PHONY: all clean install test
+.PHONY: all clean install test test-sync
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) cider.h
 	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
 	@echo "Built: ./$(TARGET)"
 
@@ -20,10 +20,8 @@ install: $(TARGET)
 test: $(TARGET)
 	./test.sh ./$(TARGET)
 
+test-sync: $(TARGET)
+	./test-sync.sh ./$(TARGET)
+
 clean:
 	rm -f $(TARGET)
-
-# macOS specific: compile on remote mac and scp back
-mac-build:
-	scp -P 23 $(SRC) ad@99.99.29.248:/tmp/
-	ssh -p 23 ad@99.99.29.248 'cd /tmp && clang -framework Foundation -framework CoreData -o cider cider.m && echo "Build OK"'
