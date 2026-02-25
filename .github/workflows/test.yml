@@ -31,14 +31,14 @@ jobs:
 
       - name: Error handling
         run: |
-          # Unknown command exits 1
-          ! ./cider bogus 2>/dev/null
-          # Unknown notes subcommand exits 1
-          ! ./cider notes bogus 2>/dev/null
-          # Nonexistent note exits 1
-          ./cider notes show 99999 2>/dev/null; test $? -eq 1
-          # Replace on nonexistent note exits 1
-          ./cider notes replace 99999 --find x --replace y 2>/dev/null; test $? -eq 1
+          # Unknown command exits non-zero
+          ./cider bogus 2>/dev/null && exit 1 || true
+          # Unknown notes subcommand exits non-zero
+          ./cider notes bogus 2>/dev/null && exit 1 || true
+          # Nonexistent note exits non-zero
+          ./cider notes show 99999 2>/dev/null && exit 1 || true
+          # Replace on nonexistent note exits non-zero
+          ./cider notes replace 99999 --find x --replace y 2>/dev/null && exit 1 || true
           echo "All error handling tests passed"
 
   # Full integration tests require a real Notes database.
