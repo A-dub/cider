@@ -30,8 +30,12 @@ void printHelp(void) {
 "  edit <N>                            Edit note N (CRDT — preserves attachments!)\n"
 "  delete <N>                          Delete note N\n"
 "  move <N> <folder>                   Move note N to folder\n"
-"  replace <N> --find <s> --replace <s>  Find & replace text in note N\n"
-"  search <query> [--json]             Search notes by text\n"
+"  replace <N> --find <s> --replace <s> [--regex] [-i]\n"
+"                                       Find & replace in note N (full content)\n"
+"  replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]\n"
+"                                       Find & replace across multiple notes\n"
+"  search <query> [--json] [--regex] [--title] [--body] [-f <folder>]\n"
+"                                       Search notes (title + body by default)\n"
 "  export <path>                       Export all notes to HTML\n"
 "  attachments <N> [--json]             List attachments in note N\n"
 "  attach <N> <file> [--at <pos>]      Add file attachment to note N\n"
@@ -93,17 +97,62 @@ void printNotesHelp(void) {
 "                                           Pipe: echo 'content' | cider notes edit N\n"
 "  cider notes delete <N>                   Delete note N\n"
 "  cider notes move <N> <folder>            Move note N to folder\n"
-"  cider notes replace <N> --find <s> --replace <s>\n"
-"                                           Find & replace text in note N\n"
-"  cider notes search <query> [--json]      Search notes\n"
 "  cider notes export <path>                Export notes to HTML\n"
-"  cider notes attachments <N> [--json]        List attachments with positions\n"
+"  cider notes attachments <N> [--json]     List attachments with positions\n"
 "  cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)\n"
-"  cider notes detach <N> [<A>]               Remove attachment A from note N\n"
+"  cider notes detach <N> [<A>]             Remove attachment A from note N\n"
+"\n"
+"SEARCH:\n"
+"  cider notes search <query> [options]\n"
+"\n"
+"  Searches note title AND body by default (case-insensitive).\n"
+"\n"
+"  --regex          Treat query as ICU regular expression\n"
+"  --title          Search title only (mutually exclusive with --body)\n"
+"  --body           Search body only (mutually exclusive with --title)\n"
+"  -f, --folder <f> Scope search to a specific folder\n"
+"  --json           Output results as JSON\n"
+"\n"
+"  Examples:\n"
+"    cider notes search \"meeting\"                  Literal search (title + body)\n"
+"    cider notes search \"\\\\d{3}-\\\\d{4}\" --regex     Find phone numbers\n"
+"    cider notes search \"TODO\" --title              Search titles only\n"
+"    cider notes search \"important\" --body -f Work  Search body in Work folder\n"
+"\n"
+"REPLACE (single note):\n"
+"  cider notes replace <N> --find <s> --replace <s> [options]\n"
+"\n"
+"  Replaces text in the full content (title is the first line) of note N.\n"
+"  Operates on a single note. Attachments are never touched.\n"
+"\n"
+"  --regex          Treat --find as ICU regex; --replace supports $1, $2 backrefs\n"
+"  -i, --case-insensitive   Case-insensitive matching\n"
+"\n"
+"  Examples:\n"
+"    cider notes replace 3 --find old --replace new\n"
+"    cider notes replace 3 --find \"(\\\\w+)@(\\\\w+)\" --replace \"[$1 at $2]\" --regex\n"
+"    cider notes replace 3 --find \"todo\" --replace \"DONE\" -i\n"
+"\n"
+"REPLACE (multiple notes):\n"
+"  cider notes replace --all --find <s> --replace <s> [options]\n"
+"\n"
+"  Replaces across ALL notes (or folder-scoped). Shows a summary and asks\n"
+"  for confirmation before applying. Skips notes where attachments would change.\n"
+"\n"
+"  --all             Required: enables multi-note mode\n"
+"  --folder <f>, -f  Scope to a specific folder\n"
+"  --dry-run         Preview changes without applying\n"
+"  --regex           ICU regex (--replace supports $1, $2)\n"
+"  -i, --case-insensitive   Case-insensitive matching\n"
+"\n"
+"  Examples:\n"
+"    cider notes replace --all --find old --replace new --dry-run\n"
+"    cider notes replace --all --find old --replace new -f Work\n"
+"    cider notes replace --all --find \"http://\" --replace \"https://\" --folder Work\n"
 "\n"
 "OPTIONS:\n"
 "  --json    Output as JSON (for list, show, search, folders)\n"
-"  -f, --folder <name>   Filter by folder (for list) or set folder (for add)\n"
+"  -f, --folder <name>   Filter by folder (for list, search, replace --all)\n"
 "\n"
 "Interactive mode: if <N> is omitted from edit/delete/move/show/replace/attach,\n"
 "you'll be prompted to enter it (when stdin is a terminal).\n"
@@ -278,6 +327,23 @@ int main(int argc, char *argv[]) {
 
             // ── cider notes replace ──
             } else if ([sub isEqualToString:@"replace"]) {
+                BOOL useRegex = argHasFlag(argc, argv, 3, "--regex", NULL);
+                BOOL caseInsensitive = argHasFlag(argc, argv, 3, "-i", "--case-insensitive");
+                BOOL replaceAll = argHasFlag(argc, argv, 3, "--all", NULL);
+                NSString *findStr = argValue(argc, argv, 3, "--find", NULL);
+                NSString *replaceStr = argValue(argc, argv, 3, "--replace", NULL);
+
+                if (replaceAll) {
+                    if (!findStr || !replaceStr) {
+                        fprintf(stderr, "Usage: cider notes replace --all --find <text> --replace <text> [--folder <f>] [--regex] [-i] [--dry-run]\n");
+                        return 1;
+                    }
+                    NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                    BOOL dryRun = argHasFlag(argc, argv, 3, "--dry-run", NULL);
+                    return cmdNotesReplaceAll(findStr, replaceStr, folder,
+                                             useRegex, caseInsensitive, dryRun);
+                }
+
                 NSUInteger idx = 0;
                 if (argc >= 4) {
                     int v = atoi(argv[3]);
@@ -285,23 +351,29 @@ int main(int argc, char *argv[]) {
                 }
                 if (!idx) idx = promptNoteIndex(@"replace", nil);
                 if (!idx) return 1;
-                NSString *findStr = argValue(argc, argv, 3, "--find", NULL);
-                NSString *replaceStr = argValue(argc, argv, 3, "--replace", NULL);
                 if (!findStr || !replaceStr) {
-                    fprintf(stderr, "Usage: cider notes replace <N> --find <text> --replace <text>\n");
+                    fprintf(stderr, "Usage: cider notes replace <N> --find <text> --replace <text> [--regex] [-i]\n");
                     return 1;
                 }
-                return cmdNotesReplace(idx, findStr, replaceStr);
+                return cmdNotesReplace(idx, findStr, replaceStr, useRegex, caseInsensitive);
 
             // ── cider notes search ──
             } else if ([sub isEqualToString:@"search"]) {
                 if (argc < 4) {
-                    fprintf(stderr, "Usage: cider notes search <query>\n");
+                    fprintf(stderr, "Usage: cider notes search <query> [--regex] [--title] [--body] [-f <folder>] [--json]\n");
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
-                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
-                cmdNotesSearch(query, jsonOut);
+                BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
+                BOOL useRegex = argHasFlag(argc, argv, 4, "--regex", NULL);
+                BOOL titleOnly = argHasFlag(argc, argv, 4, "--title", NULL);
+                BOOL bodyOnly = argHasFlag(argc, argv, 4, "--body", NULL);
+                NSString *folder = argValue(argc, argv, 4, "--folder", "-f");
+                if (titleOnly && bodyOnly) {
+                    fprintf(stderr, "Error: --title and --body are mutually exclusive\n");
+                    return 1;
+                }
+                cmdNotesSearch(query, jsonOut, useRegex, titleOnly, bodyOnly, folder);
 
             // ── cider notes export ──
             } else if ([sub isEqualToString:@"export"]) {
@@ -466,7 +538,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesSearch(query, NO);
+                cmdNotesSearch(query, NO, NO, NO, NO, nil);
 
             } else if ([sub isEqualToString:@"--export"]) {
                 if (argc < 4) {

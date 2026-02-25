@@ -351,7 +351,8 @@ void cmdNotesEdit(NSUInteger idx) {
     }
 }
 
-int cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
+int cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr,
+                    BOOL useRegex, BOOL caseInsensitive) {
     id note = noteAtIndex(idx, nil);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
@@ -359,15 +360,59 @@ int cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
     }
 
     NSString *rawText = noteRawText(note);
-    NSRange found = [rawText rangeOfString:findStr];
-    if (found.location == NSNotFound) {
-        fprintf(stderr, "Error: Text not found in note %lu: \"%s\"\n",
-                (unsigned long)idx, [findStr UTF8String]);
-        return 1;
+    NSString *newRaw = nil;
+
+    if (useRegex) {
+        NSRegularExpressionOptions opts = 0;
+        if (caseInsensitive) opts |= NSRegularExpressionCaseInsensitive;
+        NSError *regexErr = nil;
+        NSRegularExpression *regex = [NSRegularExpression
+            regularExpressionWithPattern:findStr options:opts error:&regexErr];
+        if (regexErr) {
+            fprintf(stderr, "Error: Invalid regex: %s\n",
+                    [[regexErr localizedDescription] UTF8String]);
+            return 1;
+        }
+        NSUInteger matches = [regex numberOfMatchesInString:rawText options:0
+                              range:NSMakeRange(0, rawText.length)];
+        if (matches == 0) {
+            fprintf(stderr, "Error: Pattern not found in note %lu: \"%s\"\n",
+                    (unsigned long)idx, [findStr UTF8String]);
+            return 1;
+        }
+        newRaw = [regex stringByReplacingMatchesInString:rawText options:0
+                  range:NSMakeRange(0, rawText.length) withTemplate:replaceStr];
+    } else {
+        NSStringCompareOptions opts = 0;
+        if (caseInsensitive) opts |= NSCaseInsensitiveSearch;
+        NSRange found = [rawText rangeOfString:findStr options:opts];
+        if (found.location == NSNotFound) {
+            fprintf(stderr, "Error: Text not found in note %lu: \"%s\"\n",
+                    (unsigned long)idx, [findStr UTF8String]);
+            return 1;
+        }
+        if (caseInsensitive) {
+            // Replace all occurrences case-insensitively
+            newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
+                      withString:replaceStr options:NSCaseInsensitiveSearch
+                      range:NSMakeRange(0, rawText.length)];
+        } else {
+            newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
+                      withString:replaceStr];
+        }
     }
 
-    NSString *newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
-                                                          withString:replaceStr];
+    // Attachment safety check
+    NSUInteger origCount = 0, newCount = 0;
+    for (NSUInteger i = 0; i < rawText.length; i++)
+        if ([rawText characterAtIndex:i] == ATTACHMENT_MARKER) origCount++;
+    for (NSUInteger i = 0; i < newRaw.length; i++)
+        if ([newRaw characterAtIndex:i] == ATTACHMENT_MARKER) newCount++;
+    if (origCount != newCount) {
+        fprintf(stderr, "Error: Replace would change attachment count (%lu → %lu). Aborting.\n",
+                (unsigned long)origCount, (unsigned long)newCount);
+        return 1;
+    }
 
     if (!applyCRDTEdit(note, rawText, newRaw)) return 1;
 
@@ -379,6 +424,154 @@ int cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr) {
         fprintf(stderr, "Error: save failed\n");
         return 1;
     }
+}
+
+int cmdNotesReplaceAll(NSString *findStr, NSString *replaceStr, NSString *folder,
+                       BOOL useRegex, BOOL caseInsensitive, BOOL dryRun) {
+    NSArray *notes = filteredNotes(folder);
+    if (!notes || notes.count == 0) {
+        printf("No notes%s.\n", folder ? [[NSString stringWithFormat:@" in folder \"%@\"", folder] UTF8String] : "");
+        return 0;
+    }
+
+    // Compile regex once if needed
+    NSRegularExpression *regex = nil;
+    if (useRegex) {
+        NSRegularExpressionOptions opts = 0;
+        if (caseInsensitive) opts |= NSRegularExpressionCaseInsensitive;
+        NSError *regexErr = nil;
+        regex = [NSRegularExpression regularExpressionWithPattern:findStr
+                 options:opts error:&regexErr];
+        if (regexErr) {
+            fprintf(stderr, "Error: Invalid regex: %s\n",
+                    [[regexErr localizedDescription] UTF8String]);
+            return 1;
+        }
+    }
+
+    NSStringCompareOptions strOpts = 0;
+    if (caseInsensitive) strOpts |= NSCaseInsensitiveSearch;
+
+    // Scan all notes for matches
+    NSMutableArray *matchedNotes = [NSMutableArray array];
+    NSMutableArray *matchCounts = [NSMutableArray array];
+    NSUInteger totalMatches = 0;
+
+    for (id note in notes) {
+        NSString *rawText = noteRawText(note);
+        if (!rawText || rawText.length == 0) continue;
+
+        NSUInteger count = 0;
+        if (useRegex) {
+            count = [regex numberOfMatchesInString:rawText options:0
+                     range:NSMakeRange(0, rawText.length)];
+        } else {
+            NSRange searchRange = NSMakeRange(0, rawText.length);
+            while (searchRange.location < rawText.length) {
+                NSRange found = [rawText rangeOfString:findStr options:strOpts
+                                 range:searchRange];
+                if (found.location == NSNotFound) break;
+                count++;
+                searchRange.location = found.location + found.length;
+                searchRange.length = rawText.length - searchRange.location;
+            }
+        }
+
+        if (count > 0) {
+            [matchedNotes addObject:note];
+            [matchCounts addObject:@(count)];
+            totalMatches += count;
+        }
+    }
+
+    if (matchedNotes.count == 0) {
+        printf("No matches found for \"%s\"%s.\n",
+               [findStr UTF8String],
+               folder ? [[NSString stringWithFormat:@" in folder \"%@\"", folder] UTF8String] : "");
+        return 0;
+    }
+
+    // Print summary
+    printf("Found %lu match(es) in %lu note(s)%s:\n\n",
+           (unsigned long)totalMatches,
+           (unsigned long)matchedNotes.count,
+           folder ? [[NSString stringWithFormat:@" in \"%@\"", folder] UTF8String] : "");
+
+    for (NSUInteger i = 0; i < matchedNotes.count; i++) {
+        NSString *t = noteTitle(matchedNotes[i]);
+        NSString *f = folderName(matchedNotes[i]);
+        printf("  %s (%s) — %lu match(es)\n",
+               [t UTF8String], [f UTF8String],
+               (unsigned long)[matchCounts[i] unsignedIntegerValue]);
+    }
+
+    if (dryRun) {
+        printf("\n[dry-run] No changes made.\n");
+        return 0;
+    }
+
+    // Confirm
+    printf("\nReplace \"%s\" → \"%s\" in all %lu note(s)? (y/N) ",
+           [findStr UTF8String], [replaceStr UTF8String],
+           (unsigned long)matchedNotes.count);
+    fflush(stdout);
+
+    char buf[8] = {0};
+    if (fgets(buf, sizeof(buf), stdin) == NULL || (buf[0] != 'y' && buf[0] != 'Y')) {
+        printf("Cancelled.\n");
+        return 0;
+    }
+
+    // Apply replacements
+    NSUInteger replaced = 0, skipped = 0;
+    for (id note in matchedNotes) {
+        NSString *rawText = noteRawText(note);
+        NSString *newRaw = nil;
+
+        if (useRegex) {
+            newRaw = [regex stringByReplacingMatchesInString:rawText options:0
+                      range:NSMakeRange(0, rawText.length) withTemplate:replaceStr];
+        } else if (caseInsensitive) {
+            newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
+                      withString:replaceStr options:NSCaseInsensitiveSearch
+                      range:NSMakeRange(0, rawText.length)];
+        } else {
+            newRaw = [rawText stringByReplacingOccurrencesOfString:findStr
+                      withString:replaceStr];
+        }
+
+        // Attachment safety check per note
+        NSUInteger origAtt = 0, newAtt = 0;
+        for (NSUInteger i = 0; i < rawText.length; i++)
+            if ([rawText characterAtIndex:i] == ATTACHMENT_MARKER) origAtt++;
+        for (NSUInteger i = 0; i < newRaw.length; i++)
+            if ([newRaw characterAtIndex:i] == ATTACHMENT_MARKER) newAtt++;
+        if (origAtt != newAtt) {
+            NSString *t = noteTitle(note);
+            fprintf(stderr, "  Skipped \"%s\": would change attachment count (%lu → %lu)\n",
+                    [t UTF8String], (unsigned long)origAtt, (unsigned long)newAtt);
+            skipped++;
+            continue;
+        }
+
+        if (applyCRDTEdit(note, rawText, newRaw)) {
+            replaced++;
+        } else {
+            NSString *t = noteTitle(note);
+            fprintf(stderr, "  Skipped \"%s\": CRDT edit failed\n", [t UTF8String]);
+            skipped++;
+        }
+    }
+
+    if (replaced > 0 && !saveContext()) {
+        fprintf(stderr, "Error: save failed\n");
+        return 1;
+    }
+
+    printf("✓ Replaced in %lu note(s)", (unsigned long)replaced);
+    if (skipped > 0) printf(", skipped %lu", (unsigned long)skipped);
+    printf(".\n");
+    return 0;
 }
 
 void cmdNotesDelete(NSUInteger idx) {
@@ -435,11 +628,72 @@ void cmdNotesMove(NSUInteger idx, NSString *targetFolderName) {
     }
 }
 
-void cmdNotesSearch(NSString *query, BOOL jsonOutput) {
-    NSPredicate *pred = [NSPredicate predicateWithFormat:
-        @"(title CONTAINS[cd] %@) OR (snippet CONTAINS[cd] %@)",
-        query, query];
-    NSArray *results = fetchNotes(pred);
+void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
+                    BOOL titleOnly, BOOL bodyOnly, NSString *folder) {
+    NSArray *results = nil;
+
+    if (!useRegex && !bodyOnly && !folder) {
+        // Fast path: Core Data predicate (existing behavior)
+        NSPredicate *pred;
+        if (titleOnly) {
+            pred = [NSPredicate predicateWithFormat:@"title CONTAINS[cd] %@", query];
+        } else {
+            pred = [NSPredicate predicateWithFormat:
+                @"(title CONTAINS[cd] %@) OR (snippet CONTAINS[cd] %@)",
+                query, query];
+        }
+        results = fetchNotes(pred);
+    } else {
+        // Client-side filtering: regex, body-only, or folder-scoped
+        NSArray *candidates = filteredNotes(folder);
+        NSRegularExpression *regex = nil;
+        if (useRegex) {
+            NSError *regexErr = nil;
+            regex = [NSRegularExpression
+                regularExpressionWithPattern:query
+                options:NSRegularExpressionCaseInsensitive
+                error:&regexErr];
+            if (regexErr) {
+                fprintf(stderr, "Error: Invalid regex: %s\n",
+                        [[regexErr localizedDescription] UTF8String]);
+                return;
+            }
+        }
+
+        NSMutableArray *matched = [NSMutableArray array];
+        for (id note in candidates) {
+            BOOL found = NO;
+            NSString *title = noteTitle(note);
+            NSString *body = noteRawText(note);
+
+            if (!bodyOnly) {
+                // Check title
+                if (useRegex) {
+                    if ([regex numberOfMatchesInString:title options:0
+                         range:NSMakeRange(0, title.length)] > 0)
+                        found = YES;
+                } else {
+                    if ([title rangeOfString:query options:NSCaseInsensitiveSearch].location != NSNotFound)
+                        found = YES;
+                }
+            }
+            if (!found && !titleOnly) {
+                // Check body
+                if (body) {
+                    if (useRegex) {
+                        if ([regex numberOfMatchesInString:body options:0
+                             range:NSMakeRange(0, body.length)] > 0)
+                            found = YES;
+                    } else {
+                        if ([body rangeOfString:query options:NSCaseInsensitiveSearch].location != NSNotFound)
+                            found = YES;
+                    }
+                }
+            }
+            if (found) [matched addObject:note];
+        }
+        results = matched;
+    }
 
     if (!results || results.count == 0) {
         if (jsonOutput) {

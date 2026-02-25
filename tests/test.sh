@@ -115,7 +115,8 @@ cleanup() {
     log "Cleaning up test notes..."
     for title in "CiderTest Alpha" "CiderTest Beta" "CiderTest Gamma" \
                  "CiderTest Delta" "CiderTest Attach" "CiderTest Piped" \
-                 "Piped note content here"; do
+                 "Piped note content here" \
+                 "CiderTest Regex" "CiderTest ReplAll1" "CiderTest ReplAll2"; do
         delete_note_as "$title"
     done
 }
@@ -193,6 +194,9 @@ create_note "CiderTest Beta" "Beta note body. Contains the word pineapple."
 create_note "CiderTest Gamma" "Gamma note for editing and replacing text."
 create_note "CiderTest Delta" "Delta note that will be deleted."
 create_note "CiderTest Attach" "Attachment test. BEFORE_ATTACH and AFTER_ATTACH markers."
+create_note "CiderTest Regex" "Contact: alice@example.com and bob@test.org. Phone: 555-1234."
+create_note "CiderTest ReplAll1" "The quick brown fox jumps."
+create_note "CiderTest ReplAll2" "The quick brown dog runs."
 
 sleep 1  # Brief pause for any background indexing
 
@@ -277,6 +281,50 @@ fi
 run "$CIDER" notes search "xyznonexistent99"
 assert_contains "No notes found" "search: no results message for garbage query"
 
+# ── Test: search --regex ──────────────────────────────────────────────────────
+
+log "Testing: notes search --regex"
+
+run "$CIDER" notes search "[a-z]+@[a-z]+\\.[a-z]+" --regex
+if echo "$OUT" | grep -qF "CiderTest Regex"; then
+    pass "search --regex: finds note by regex body match"
+else
+    skip "search --regex (body)" "snippet not yet indexed (Notes async indexing)"
+fi
+
+run "$CIDER" notes search "CiderTest.*Regex" --regex
+assert_contains "CiderTest Regex" "search --regex: regex title match"
+
+# ── Test: search --title / --body ─────────────────────────────────────────────
+
+log "Testing: notes search --title / --body"
+
+run "$CIDER" notes search "CiderTest Alpha" --title
+assert_contains "CiderTest Alpha" "search --title: finds by title"
+
+run "$CIDER" notes search "pineapple" --title
+assert_contains "No notes found" "search --title: body content not in title"
+
+run "$CIDER" notes search "CiderTest Alpha" --title --body
+assert_rc 1 "search: --title and --body are mutually exclusive"
+
+# ── Test: search --folder ─────────────────────────────────────────────────────
+
+log "Testing: notes search --folder"
+
+run "$CIDER" notes search "CiderTest" -f "$TEST_FOLDER"
+assert_contains "CiderTest" "search --folder: finds notes in test folder"
+
+run "$CIDER" notes search "CiderTest" -f "NonexistentFolder99"
+assert_contains "No notes found" "search --folder: no results in wrong folder"
+
+# ── Test: search invalid regex ────────────────────────────────────────────────
+
+log "Testing: search invalid regex"
+
+run "$CIDER" notes search "[invalid" --regex
+assert_contains "Invalid regex" "search --regex: rejects bad pattern"
+
 # ── Test: notes add (from stdin) ─────────────────────────────────────────────
 
 log "Testing: notes add (stdin)"
@@ -324,6 +372,101 @@ else
     run "$CIDER" notes show "$IDX"
     assert_contains "REPLACED via stdin" "replace: text was replaced"
     assert_not_contains "EDITED" "replace: old text is gone"
+fi
+
+# ── Test: replace --regex (single note) ──────────────────────────────────────
+
+log "Testing: notes replace --regex"
+
+IDX=$(find_note "CiderTest Regex")
+if [ -z "$IDX" ]; then
+    fail "replace --regex" "Could not find CiderTest Regex"
+else
+    # Regex replace: email pattern → masked
+    run "$CIDER" notes replace "$IDX" --find "([a-z]+)@([a-z]+)\\.([a-z]+)" --replace "[\$1 at \$2]" --regex
+    assert_rc 0 "replace --regex: succeeded"
+
+    run "$CIDER" notes show "$IDX"
+    assert_contains "[alice at example]" "replace --regex: capture groups worked"
+    assert_not_contains "alice@example.com" "replace --regex: original email gone"
+fi
+
+# ── Test: replace -i (case-insensitive) ──────────────────────────────────────
+
+log "Testing: notes replace -i"
+
+IDX=$(find_note "CiderTest Regex")
+if [ -z "$IDX" ]; then
+    fail "replace -i" "Could not find CiderTest Regex"
+else
+    run "$CIDER" notes replace "$IDX" --find "PHONE" --replace "Tel" -i
+    assert_rc 0 "replace -i: succeeded (case-insensitive)"
+
+    run "$CIDER" notes show "$IDX"
+    # Original had "Phone:" which should now be "Tel:"
+    assert_contains "Tel:" "replace -i: case-insensitive replacement applied"
+fi
+
+# ── Test: replace --all --dry-run (scoped to test folder) ────────────────────
+
+log "Testing: notes replace --all --dry-run"
+
+run "$CIDER" notes replace --all --find "quick brown" --replace "slow grey" --folder "$TEST_FOLDER" --dry-run
+assert_contains "2 note(s)" "replace --all --dry-run: found matches in 2 notes"
+assert_contains "dry-run" "replace --all --dry-run: shows dry-run message"
+
+# Verify nothing was actually changed
+IDX=$(find_note "CiderTest ReplAll1")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes show "$IDX"
+    assert_contains "quick brown" "replace --all --dry-run: no changes applied"
+fi
+
+# ── Test: replace --all (scoped to test folder, with confirmation) ───────────
+
+log "Testing: notes replace --all --folder"
+
+run bash -c "printf 'y\n' | '$CIDER' notes replace --all --find 'quick brown' --replace 'slow grey' --folder '$TEST_FOLDER' 2>&1"
+assert_contains "Replaced in 2 note(s)" "replace --all: replaced in 2 notes"
+
+# Verify changes
+IDX=$(find_note "CiderTest ReplAll1")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes show "$IDX"
+    assert_contains "slow grey" "replace --all: ReplAll1 content changed"
+    assert_not_contains "quick brown" "replace --all: ReplAll1 old text gone"
+fi
+
+IDX=$(find_note "CiderTest ReplAll2")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes show "$IDX"
+    assert_contains "slow grey" "replace --all: ReplAll2 content changed"
+fi
+
+# ── Test: replace --all --regex --folder ─────────────────────────────────────
+
+log "Testing: notes replace --all --regex"
+
+run bash -c "printf 'y\n' | '$CIDER' notes replace --all --find '\\bslow\\b' --replace 'fast' --regex --folder '$TEST_FOLDER' 2>&1"
+assert_contains "Replaced in 2 note(s)" "replace --all --regex: replaced in 2 notes"
+
+IDX=$(find_note "CiderTest ReplAll1")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes show "$IDX"
+    assert_contains "fast grey" "replace --all --regex: content updated"
+fi
+
+# ── Test: replace nonexistent text ───────────────────────────────────────────
+
+log "Testing: replace error handling"
+
+IDX=$(find_note "CiderTest ReplAll1")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes replace "$IDX" --find "zzz_nonexistent" --replace "x"
+    assert_rc 1 "replace: nonexistent text returns error"
+
+    run "$CIDER" notes replace "$IDX" --find "[invalid" --replace "x" --regex
+    assert_rc 1 "replace --regex: invalid regex returns error"
 fi
 
 # ── Test: notes attach + attachments + detach ────────────────────────────────
