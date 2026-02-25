@@ -27,7 +27,7 @@ Attachments are `U+FFFC` characters in the CRDT string. By editing text around t
 ### Quick install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/A-dub/cider/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/A-dub/cider/master/scripts/install.sh | bash
 ```
 
 This downloads the latest release binary for your architecture and installs to `/usr/local/bin`.
@@ -59,7 +59,7 @@ make install   # copies to /usr/local/bin
 
 Or manually:
 ```bash
-clang -framework Foundation -framework CoreData -o cider cider.m
+clang -framework Foundation -framework CoreData -Isrc -o cider src/*.m
 ```
 
 **Requirements:** macOS 12+ (Monterey or later). No Python, no pip, no Homebrew dependencies. Just `clang`.
@@ -192,7 +192,7 @@ cider sync watch --dir ~/my-notes --interval 5
 cider sync backup
 ```
 
-Sync mirrors Apple Notes to local Markdown files with YAML frontmatter and extracts attachments. Pre-existing notes are read-only (`editable: false`); new Markdown files create editable notes. See [SYNC.md](SYNC.md) for full documentation and [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md) for backup restoration.
+Sync mirrors Apple Notes to local Markdown files with YAML frontmatter and extracts attachments. Pre-existing notes are read-only (`editable: false`); new Markdown files create editable notes. See [SYNC.md](docs/SYNC.md) for full documentation and [DISASTER-RECOVERY.md](docs/DISASTER-RECOVERY.md) for backup restoration.
 
 ## How Editing Works
 
@@ -237,7 +237,7 @@ cider notes replace 3 --find "old text" --replace "new text"
 | **Sync** | Bidirectional Notes <-> Markdown with SHA-256 change detection |
 | **Reminders** | `NSAppleScript` (Reminders.app — only remaining AppleScript user) |
 
-All Notes operations use the private framework directly — no AppleScript, no Notes.app process needed. Single Objective-C file. No external dependencies. Compiles in under a second.
+All Notes operations use the private framework directly — no AppleScript, no Notes.app process needed. No external dependencies. Compiles in under a second.
 
 ## Private Framework Details
 

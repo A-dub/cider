@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.0.0"
+#define VERSION "3.1.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────

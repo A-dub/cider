@@ -17,14 +17,14 @@ jobs:
       - name: Build (Apple Silicon)
         run: |
           clang -framework Foundation -framework CoreData \
-            -arch arm64 \
-            -O2 -o cider-arm64 cider.m
+            -arch arm64 -Isrc \
+            -O2 -o cider-arm64 src/main.m src/core.m src/notes.m src/reminders.m src/sync.m
 
       - name: Build (Intel)
         run: |
           clang -framework Foundation -framework CoreData \
-            -arch x86_64 \
-            -O2 -o cider-x86_64 cider.m
+            -arch x86_64 -Isrc \
+            -O2 -o cider-x86_64 src/main.m src/core.m src/notes.m src/reminders.m src/sync.m
 
       - name: Create Universal Binary
         run: |

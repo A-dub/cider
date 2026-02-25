@@ -17,13 +17,10 @@ jobs:
 
       - name: Build
         run: |
-          clang -framework Foundation -framework CoreData \
-            -Wall -Wno-deprecated-declarations -fobjc-arc \
-            -O2 -o cider cider.m
-          echo "Build successful"
+          make
           ./cider --version
 
       - name: Run tests
         run: |
-          chmod +x test.sh
-          ./test.sh ./cider
+          chmod +x tests/test.sh
+          make test
