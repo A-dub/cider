@@ -1,4 +1,4 @@
-name: Build
+name: Test Suite
 
 on:
   push:
@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   build:
+    name: Build & Smoke Test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,10 +19,38 @@ jobs:
       - name: Build
         run: make
 
-      - name: Verify binary
+      - name: Version
+        run: ./cider --version
+
+      - name: Help text
         run: |
-          ./cider --version
           ./cider --help
           ./cider notes --help
           ./cider rem --help
           ./cider sync --help
+
+      - name: Error handling
+        run: |
+          # Unknown command exits 1
+          ! ./cider bogus 2>/dev/null
+          # Unknown notes subcommand exits 1
+          ! ./cider notes bogus 2>/dev/null
+          # Nonexistent note exits 1
+          ./cider notes show 99999 2>/dev/null; test $? -eq 1
+          # Replace on nonexistent note exits 1
+          ./cider notes replace 99999 --find x --replace y 2>/dev/null; test $? -eq 1
+          echo "All error handling tests passed"
+
+  # Full integration tests require a real Notes database.
+  # Uncomment and use a self-hosted runner when available.
+  # integration:
+  #   name: Integration Tests
+  #   runs-on: self-hosted
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Build
+  #       run: make
+  #     - name: Run tests
+  #       run: make test
+  #     - name: Run sync tests
+  #       run: make test-sync
