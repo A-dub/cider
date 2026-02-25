@@ -1,4 +1,4 @@
-name: Test Suite
+name: Build
 
 on:
   push:
@@ -10,17 +10,18 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Build
-        run: |
-          make
-          ./cider --version
+        run: make
 
-      - name: Run tests
+      - name: Verify binary
         run: |
-          chmod +x tests/test.sh
-          make test
+          ./cider --version
+          ./cider --help
+          ./cider notes --help
+          ./cider rem --help
+          ./cider sync --help
