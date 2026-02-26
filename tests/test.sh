@@ -940,6 +940,47 @@ run "$CIDER" notes links 99999
 assert_rc 0 "links: nonexistent note shows error"
 assert_contains "not found" "links: error message for nonexistent"
 
+# ── Test: tables ───────────────────────────────────────────────────────
+
+log "Testing: tables"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "table" "Could not find CiderTest Alpha"
+else
+    # Table on note with no tables
+    run "$CIDER" notes table "$IDX"
+    assert_rc 0 "table: exits 0 on note without tables"
+    assert_contains "No tables" "table: shows no tables message"
+
+    # Table --list on empty
+    run "$CIDER" notes table "$IDX" --list
+    assert_rc 0 "table --list: exits 0 on empty"
+    assert_contains "No tables" "table --list: shows no tables message"
+
+    # Table --json on empty
+    run "$CIDER" notes table "$IDX" --json
+    assert_rc 0 "table --json: exits 0 on empty"
+    assert_contains "error" "table --json: shows error message"
+
+    # Table --csv on empty
+    run "$CIDER" notes table "$IDX" --csv
+    assert_rc 0 "table --csv: exits 0 on empty"
+    assert_contains "No tables" "table --csv: shows no tables message"
+fi
+
+# Table on nonexistent note
+run "$CIDER" notes table 99999
+assert_rc 0 "table: nonexistent note shows error"
+assert_contains "not found" "table: error message for nonexistent"
+
+# Table --headers on empty
+IDX=$(find_note "CiderTest Alpha")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes table "$IDX" --headers
+    assert_contains "No tables" "table --headers: shows no tables on empty"
+fi
+
 # ── Test: checklists ───────────────────────────────────────────────────
 
 log "Testing: checklists"

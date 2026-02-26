@@ -2659,3 +2659,284 @@ int cmdNotesUncheck(NSUInteger idx, NSUInteger itemNum, NSString *folder) {
            [target[@"text"] UTF8String]);
     return 0;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tables
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Find table attachments for a note
+static NSArray *tableAttachmentsForNote(id note) {
+    NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICAttachment"];
+    req.predicate = [NSPredicate predicateWithFormat:
+        @"typeUTI == 'com.apple.notes.table' AND note == %@", note];
+    NSArray *results = [g_moc executeFetchRequest:req error:nil];
+    return results ?: @[];
+}
+
+void cmdNotesTable(NSUInteger idx, NSString *folder, NSUInteger tableIdx,
+                   BOOL jsonOut, BOOL csvOut, BOOL listTables, BOOL headersOnly,
+                   NSInteger rowNum) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSArray *tableAtts = tableAttachmentsForNote(note);
+    NSString *title = noteTitle(note);
+
+    if (tableAtts.count == 0) {
+        if (jsonOut) {
+            printf("{\"error\":\"No tables in note\"}\n");
+        } else {
+            printf("No tables in \"%s\".\n", [title UTF8String]);
+        }
+        return;
+    }
+
+    // --list: show all tables with row/col counts
+    if (listTables) {
+        if (jsonOut) {
+            printf("[");
+            for (NSUInteger i = 0; i < tableAtts.count; i++) {
+                id att = tableAtts[i];
+                id tm = ((id (*)(id, SEL))objc_msgSend)(att, NSSelectorFromString(@"tableModel"));
+                id tbl = ((id (*)(id, SEL))objc_msgSend)(tm, NSSelectorFromString(@"table"));
+                NSUInteger rows = ((NSUInteger (*)(id, SEL))objc_msgSend)(tbl, NSSelectorFromString(@"rowCount"));
+                NSUInteger cols = ((NSUInteger (*)(id, SEL))objc_msgSend)(tbl, NSSelectorFromString(@"columnCount"));
+                printf("%s{\"index\":%lu,\"rows\":%lu,\"columns\":%lu}",
+                       i > 0 ? "," : "",
+                       (unsigned long)i, (unsigned long)rows, (unsigned long)cols);
+            }
+            printf("]\n");
+        } else {
+            printf("Tables in \"%s\":\n\n", [title UTF8String]);
+            for (NSUInteger i = 0; i < tableAtts.count; i++) {
+                id att = tableAtts[i];
+                id tm = ((id (*)(id, SEL))objc_msgSend)(att, NSSelectorFromString(@"tableModel"));
+                id tbl = ((id (*)(id, SEL))objc_msgSend)(tm, NSSelectorFromString(@"table"));
+                NSUInteger rows = ((NSUInteger (*)(id, SEL))objc_msgSend)(tbl, NSSelectorFromString(@"rowCount"));
+                NSUInteger cols = ((NSUInteger (*)(id, SEL))objc_msgSend)(tbl, NSSelectorFromString(@"columnCount"));
+                printf("  %lu. %lu rows x %lu columns\n",
+                       (unsigned long)i, (unsigned long)rows, (unsigned long)cols);
+            }
+            printf("\nTotal: %lu table(s)\n", (unsigned long)tableAtts.count);
+        }
+        return;
+    }
+
+    // Select table by index
+    if (tableIdx >= tableAtts.count) {
+        fprintf(stderr, "Error: Table index %lu out of range (note has %lu table(s))\n",
+                (unsigned long)tableIdx, (unsigned long)tableAtts.count);
+        return;
+    }
+
+    id att = tableAtts[tableIdx];
+    id tableModel = ((id (*)(id, SEL))objc_msgSend)(att, NSSelectorFromString(@"tableModel"));
+    if (!tableModel) {
+        fprintf(stderr, "Error: Could not get table model\n");
+        return;
+    }
+    id table = ((id (*)(id, SEL))objc_msgSend)(tableModel, NSSelectorFromString(@"table"));
+    if (!table) {
+        fprintf(stderr, "Error: Could not get table data\n");
+        return;
+    }
+
+    NSUInteger rowCount = ((NSUInteger (*)(id, SEL))objc_msgSend)(table, NSSelectorFromString(@"rowCount"));
+    NSUInteger colCount = ((NSUInteger (*)(id, SEL))objc_msgSend)(table, NSSelectorFromString(@"columnCount"));
+
+    if (rowCount == 0 || colCount == 0) {
+        printf("Table is empty.\n");
+        return;
+    }
+
+    // Collect all rows
+    NSMutableArray *allRows = [NSMutableArray array];
+    for (NSUInteger r = 0; r < rowCount; r++) {
+        @try {
+            NSArray *strings = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                tableModel, NSSelectorFromString(@"stringsAtRow:"), r);
+            if (strings) {
+                // Pad to colCount
+                NSMutableArray *row = [NSMutableArray arrayWithArray:strings];
+                while (row.count < colCount) [row addObject:@""];
+                [allRows addObject:row];
+            }
+        } @catch (NSException *e) {
+            // Skip bad rows
+        }
+    }
+
+    if (allRows.count == 0) {
+        printf("Table has no readable data.\n");
+        return;
+    }
+
+    // --headers: just first row
+    if (headersOnly) {
+        NSArray *headers = allRows[0];
+        if (jsonOut) {
+            printf("[");
+            for (NSUInteger c = 0; c < headers.count; c++) {
+                printf("%s\"%s\"", c > 0 ? "," : "",
+                       [jsonEscapeString(headers[c]) UTF8String]);
+            }
+            printf("]\n");
+        } else if (csvOut) {
+            for (NSUInteger c = 0; c < headers.count; c++) {
+                if (c > 0) printf(",");
+                NSString *h = headers[c];
+                if ([h rangeOfString:@","].location != NSNotFound ||
+                    [h rangeOfString:@"\""].location != NSNotFound) {
+                    h = [h stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+                    printf("\"%s\"", [h UTF8String]);
+                } else {
+                    printf("%s", [h UTF8String]);
+                }
+            }
+            printf("\n");
+        } else {
+            for (NSUInteger c = 0; c < headers.count; c++) {
+                printf("%s%s", c > 0 ? " | " : "", [headers[c] UTF8String]);
+            }
+            printf("\n");
+        }
+        return;
+    }
+
+    // --row N: specific row
+    if (rowNum >= 0) {
+        if ((NSUInteger)rowNum >= allRows.count) {
+            fprintf(stderr, "Error: Row %ld out of range (table has %lu rows)\n",
+                    (long)rowNum, (unsigned long)allRows.count);
+            return;
+        }
+        NSArray *row = allRows[(NSUInteger)rowNum];
+        if (jsonOut) {
+            // Use headers as keys if row 0 exists
+            if (rowNum > 0 && allRows.count > 0) {
+                NSArray *headers = allRows[0];
+                printf("{");
+                for (NSUInteger c = 0; c < row.count; c++) {
+                    NSString *key = (c < headers.count) ? headers[c] : [NSString stringWithFormat:@"col%lu", (unsigned long)c];
+                    printf("%s\"%s\":\"%s\"", c > 0 ? "," : "",
+                           [jsonEscapeString(key) UTF8String],
+                           [jsonEscapeString(row[c]) UTF8String]);
+                }
+                printf("}\n");
+            } else {
+                printf("[");
+                for (NSUInteger c = 0; c < row.count; c++) {
+                    printf("%s\"%s\"", c > 0 ? "," : "",
+                           [jsonEscapeString(row[c]) UTF8String]);
+                }
+                printf("]\n");
+            }
+        } else if (csvOut) {
+            for (NSUInteger c = 0; c < row.count; c++) {
+                if (c > 0) printf(",");
+                NSString *val = row[c];
+                if ([val rangeOfString:@","].location != NSNotFound ||
+                    [val rangeOfString:@"\""].location != NSNotFound) {
+                    val = [val stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+                    printf("\"%s\"", [val UTF8String]);
+                } else {
+                    printf("%s", [val UTF8String]);
+                }
+            }
+            printf("\n");
+        } else {
+            for (NSUInteger c = 0; c < row.count; c++) {
+                printf("%s%s", c > 0 ? " | " : "", [row[c] UTF8String]);
+            }
+            printf("\n");
+        }
+        return;
+    }
+
+    // Full table output
+    if (jsonOut) {
+        // Array of objects using row 0 as headers
+        NSArray *headers = allRows[0];
+        printf("[");
+        for (NSUInteger r = 1; r < allRows.count; r++) {
+            NSArray *row = allRows[r];
+            printf("%s{", r > 1 ? "," : "");
+            for (NSUInteger c = 0; c < colCount; c++) {
+                NSString *key = (c < headers.count) ? headers[c] : [NSString stringWithFormat:@"col%lu", (unsigned long)c];
+                NSString *val = (c < row.count) ? row[c] : @"";
+                printf("%s\"%s\":\"%s\"", c > 0 ? "," : "",
+                       [jsonEscapeString(key) UTF8String],
+                       [jsonEscapeString(val) UTF8String]);
+            }
+            printf("}");
+        }
+        printf("]\n");
+        return;
+    }
+
+    if (csvOut) {
+        for (NSUInteger r = 0; r < allRows.count; r++) {
+            NSArray *row = allRows[r];
+            for (NSUInteger c = 0; c < colCount; c++) {
+                if (c > 0) printf(",");
+                NSString *val = (c < row.count) ? row[c] : @"";
+                if ([val rangeOfString:@","].location != NSNotFound ||
+                    [val rangeOfString:@"\""].location != NSNotFound ||
+                    [val rangeOfString:@"\n"].location != NSNotFound) {
+                    val = [val stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+                    printf("\"%s\"", [val UTF8String]);
+                } else {
+                    printf("%s", [val UTF8String]);
+                }
+            }
+            printf("\n");
+        }
+        return;
+    }
+
+    // Default: aligned columns with | separators
+    // Calculate column widths
+    NSMutableArray *widths = [NSMutableArray array];
+    for (NSUInteger c = 0; c < colCount; c++) {
+        NSUInteger maxW = 0;
+        for (NSArray *row in allRows) {
+            NSString *val = (c < row.count) ? row[c] : @"";
+            if ([val length] > maxW) maxW = [val length];
+        }
+        if (maxW < 3) maxW = 3;
+        [widths addObject:@(maxW)];
+    }
+
+    // Print header row
+    printf("| ");
+    for (NSUInteger c = 0; c < colCount; c++) {
+        NSString *val = (c < [allRows[0] count]) ? allRows[0][c] : @"";
+        printf("%-*s", (int)[widths[c] unsignedIntegerValue], [val UTF8String]);
+        if (c + 1 < colCount) printf(" | ");
+    }
+    printf(" |\n");
+
+    // Separator
+    printf("|");
+    for (NSUInteger c = 0; c < colCount; c++) {
+        printf("-");
+        for (NSUInteger i = 0; i < [widths[c] unsignedIntegerValue]; i++) printf("-");
+        printf("-|");
+    }
+    printf("\n");
+
+    // Data rows
+    for (NSUInteger r = 1; r < allRows.count; r++) {
+        NSArray *row = allRows[r];
+        printf("| ");
+        for (NSUInteger c = 0; c < colCount; c++) {
+            NSString *val = (c < row.count) ? row[c] : @"";
+            printf("%-*s", (int)[widths[c] unsignedIntegerValue], [val UTF8String]);
+            if (c + 1 < colCount) printf(" | ");
+        }
+        printf(" |\n");
+    }
+}

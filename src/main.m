@@ -38,6 +38,7 @@ void printHelp(void) {
 "  tag <N> <tag>                       Add #tag to note N\n"
 "  untag <N> <tag>                     Remove #tag from note N\n"
 "  tags [--count] [--json]             List all unique tags\n"
+"  table <N> [options]                Show table data (aligned, CSV, JSON)\n"
 "  checklist <N> [--summary] [--json] Show checklist items with status\n"
 "  check <N> <item#>                 Check off checklist item\n"
 "  uncheck <N> <item#>               Uncheck checklist item\n"
@@ -174,6 +175,28 @@ void printNotesHelp(void) {
 "    cider templates show \"Meeting Notes\"  View template content\n"
 "    cider notes add --template \"Meeting Notes\"  Create note from template\n"
 "    cider notes add --template \"TODO\" -f Work   Template + target folder\n"
+"\n"
+"TABLES:\n"
+"  cider notes table <N>                     Show first table (aligned columns)\n"
+"  cider notes table <N> --list              List all tables with row/col counts\n"
+"  cider notes table <N> --index 1           Show second table (0-based)\n"
+"  cider notes table <N> --json              Table as JSON array of objects\n"
+"  cider notes table <N> --csv               Table as CSV\n"
+"  cider notes table <N> --row 2             Specific row (0-based)\n"
+"  cider notes table <N> --headers           Column headers only\n"
+"\n"
+"  Reads native Apple Notes tables (com.apple.notes.table attachments).\n"
+"  Uses ICAttachmentTableModel and ICTable to access row/column data.\n"
+"  Row 0 is treated as the header row for JSON key names.\n"
+"\n"
+"  Examples:\n"
+"    cider notes table 5                     Show first table, aligned\n"
+"    cider notes table 5 --list              List tables in note 5\n"
+"    cider notes table 5 --json              JSON array of {header: value}\n"
+"    cider notes table 5 --csv               CSV output\n"
+"    cider notes table 5 --row 0             First row (headers)\n"
+"    cider notes table 5 --index 1 --csv     Second table as CSV\n"
+"    cider notes table 5 --headers           Column headers only\n"
 "\n"
 "CHECKLISTS:\n"
 "  cider notes checklist <N>                 Show checklist items with status\n"
@@ -706,6 +729,28 @@ int main(int argc, char *argv[]) {
                     if (!idx) return 1;
                     cmdNotesBacklinks(idx, folder, jsonOut);
                 }
+
+            // ── cider notes table ──
+            } else if ([sub isEqualToString:@"table"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"show table for", folder);
+                if (!idx) return 1;
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                BOOL csvOut = argHasFlag(argc, argv, 3, "--csv", NULL);
+                BOOL listTables = argHasFlag(argc, argv, 3, "--list", NULL);
+                BOOL headersOnly = argHasFlag(argc, argv, 3, "--headers", NULL);
+                NSUInteger tableIdx = 0;
+                NSString *indexStr = argValue(argc, argv, 3, "--index", NULL);
+                if (indexStr) tableIdx = (NSUInteger)[indexStr intValue];
+                NSInteger rowNum = -1;
+                NSString *rowStr = argValue(argc, argv, 3, "--row", NULL);
+                if (rowStr) rowNum = [rowStr integerValue];
+                cmdNotesTable(idx, folder, tableIdx, jsonOut, csvOut, listTables, headersOnly, rowNum);
 
             // ── cider notes checklist ──
             } else if ([sub isEqualToString:@"checklist"]) {
