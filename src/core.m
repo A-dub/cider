@@ -174,6 +174,20 @@ NSString *noteURIString(id note) {
     return [uri absoluteString];
 }
 
+NSString *noteIdentifier(id note) {
+    return [note valueForKey:@"identifier"];
+}
+
+id findNoteByIdentifier(NSString *identifier) {
+    if (!identifier || identifier.length == 0) return nil;
+    NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICNote"];
+    req.predicate = [NSPredicate predicateWithFormat:
+        @"markedForDeletion == NO AND identifier ==[c] %@", identifier];
+    req.fetchLimit = 1;
+    NSArray *results = [g_moc executeFetchRequest:req error:nil];
+    return results.count > 0 ? results.firstObject : nil;
+}
+
 NSInteger noteIntPK(id note) {
     NSString *uri = noteURIString(note);
     NSRange pRange = [uri rangeOfString:@"/p" options:NSBackwardsSearch];

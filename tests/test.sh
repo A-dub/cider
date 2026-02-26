@@ -864,6 +864,48 @@ else
     run "$CIDER" notes untag "$IDX" "test-tag"
 fi
 
+# ── Test: links / backlinks ────────────────────────────────────────────
+
+log "Testing: links / backlinks"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "links" "Could not find CiderTest Alpha"
+else
+    # Links on a note with no links
+    run "$CIDER" notes links "$IDX"
+    assert_rc 0 "links: exits 0"
+    assert_contains "No outgoing links" "links: shows no links message"
+
+    # Links --json on empty
+    run "$CIDER" notes links "$IDX" --json
+    assert_rc 0 "links --json: exits 0"
+    assert_contains "[]" "links --json: empty array"
+
+    # Backlinks on test note
+    run "$CIDER" notes backlinks "$IDX"
+    assert_rc 0 "backlinks: exits 0"
+    assert_contains "No notes link" "backlinks: shows no backlinks message"
+
+    # Backlinks --json on empty
+    run "$CIDER" notes backlinks "$IDX" --json
+    assert_rc 0 "backlinks --json: exits 0"
+    assert_contains "[]" "backlinks --json: empty array"
+
+    # Backlinks --all (works even with no links in test notes)
+    run "$CIDER" notes backlinks --all
+    assert_rc 0 "backlinks --all: exits 0"
+
+    # Backlinks --all --json
+    run "$CIDER" notes backlinks --all --json
+    assert_rc 0 "backlinks --all --json: exits 0"
+fi
+
+# Links on nonexistent note
+run "$CIDER" notes links 99999
+assert_rc 0 "links: nonexistent note shows error"
+assert_contains "not found" "links: error message for nonexistent"
+
 # ── Test: settings ─────────────────────────────────────────────────────
 
 log "Testing: settings"

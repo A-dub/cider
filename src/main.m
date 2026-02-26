@@ -38,6 +38,9 @@ void printHelp(void) {
 "  tag <N> <tag>                       Add #tag to note N\n"
 "  untag <N> <tag>                     Remove #tag from note N\n"
 "  tags [--count] [--json]             List all unique tags\n"
+"  links <N> [--json]                 Show outgoing note links\n"
+"  backlinks <N> [--json]             Show notes linking to note N\n"
+"  backlinks --all [--json]           Full link graph\n"
 "  folder create <name> [--parent <p>] Create a new folder\n"
 "  folder delete <name>                Delete empty folder\n"
 "  folder rename <old> <new>           Rename folder\n"
@@ -167,6 +170,20 @@ void printNotesHelp(void) {
 "    cider templates show \"Meeting Notes\"  View template content\n"
 "    cider notes add --template \"Meeting Notes\"  Create note from template\n"
 "    cider notes add --template \"TODO\" -f Work   Template + target folder\n"
+"\n"
+"NOTE LINKS / BACKLINKS:\n"
+"  cider notes links <N> [--json]             Show outgoing note links\n"
+"  cider notes backlinks <N> [--json]         Show notes linking to note N\n"
+"  cider notes backlinks --all [--json]       Full link graph\n"
+"\n"
+"  Links are created in Apple Notes using the >> syntax. Cider reads\n"
+"  these native note-to-note links and resolves them to note titles/indices.\n"
+"\n"
+"  Examples:\n"
+"    cider notes links 5                Show what note 5 links to\n"
+"    cider notes backlinks 5            Show notes that link to note 5\n"
+"    cider notes backlinks --all        Full link graph across all notes\n"
+"    cider notes links 5 --json         JSON output\n"
 "\n"
 "FOLDER MANAGEMENT:\n"
 "  cider notes folder create <name>           Create a new folder\n"
@@ -603,6 +620,37 @@ int main(int argc, char *argv[]) {
                 if (!idx) idx = promptNoteIndex(@"unpin", folder);
                 if (!idx) return 1;
                 return cmdNotesUnpin(idx, folder);
+
+            // ── cider notes links ──
+            } else if ([sub isEqualToString:@"links"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                if (!idx) idx = promptNoteIndex(@"show links for", folder);
+                if (!idx) return 1;
+                cmdNotesLinks(idx, folder, jsonOut);
+
+            // ── cider notes backlinks ──
+            } else if ([sub isEqualToString:@"backlinks"]) {
+                BOOL allLinks = argHasFlag(argc, argv, 3, "--all", NULL);
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                if (allLinks) {
+                    cmdNotesBacklinksAll(jsonOut);
+                } else {
+                    NSUInteger idx = 0;
+                    if (argc >= 4) {
+                        int v = atoi(argv[3]);
+                        if (v > 0) idx = (NSUInteger)v;
+                    }
+                    NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                    if (!idx) idx = promptNoteIndex(@"show backlinks for", folder);
+                    if (!idx) return 1;
+                    cmdNotesBacklinks(idx, folder, jsonOut);
+                }
 
             // ── cider notes folder ──
             } else if ([sub isEqualToString:@"folder"]) {

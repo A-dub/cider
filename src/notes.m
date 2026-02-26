@@ -1966,3 +1966,293 @@ void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx) {
     printf("✓ Removed attachment %lu (%s) from \"%s\"\n",
            (unsigned long)(attIdx + 1), [removedName UTF8String], [t UTF8String]);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Note Links / Backlinks
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Extract UUID from tokenContentIdentifier like:
+//   applenotes:note/UUID?ownerIdentifier=...
+static NSString *uuidFromTokenContentIdentifier(NSString *tci) {
+    if (!tci) return nil;
+    NSRange noteSlash = [tci rangeOfString:@"applenotes:note/"];
+    if (noteSlash.location == NSNotFound) return nil;
+    NSString *rest = [tci substringFromIndex:noteSlash.location + noteSlash.length];
+    NSRange q = [rest rangeOfString:@"?"];
+    if (q.location != NSNotFound) rest = [rest substringToIndex:q.location];
+    return [rest uppercaseString];
+}
+
+// Get outgoing link info for a note: returns array of dicts
+// Each dict: {displayText, targetIdentifier, targetTitle, targetIndex}
+static NSArray *outgoingLinks(id note) {
+    SEL sel = NSSelectorFromString(@"allNoteTextInlineAttachments");
+    if (![note respondsToSelector:sel]) return @[];
+    id inlineAtts = ((id (*)(id, SEL))objc_msgSend)(note, sel);
+    if (!inlineAtts || [inlineAtts count] == 0) return @[];
+
+    NSMutableArray *links = [NSMutableArray array];
+    for (id att in inlineAtts) {
+        BOOL isLink = (BOOL)((NSInteger (*)(id, SEL))objc_msgSend)(
+            att, NSSelectorFromString(@"isLinkAttachment"));
+        if (!isLink) continue;
+
+        NSString *displayText = ((id (*)(id, SEL))objc_msgSend)(
+            att, NSSelectorFromString(@"altText"));
+        NSString *tci = ((id (*)(id, SEL))objc_msgSend)(
+            att, NSSelectorFromString(@"tokenContentIdentifier"));
+        NSString *targetUUID = uuidFromTokenContentIdentifier(tci);
+
+        NSMutableDictionary *info = [NSMutableDictionary dictionary];
+        info[@"displayText"] = displayText ?: @"(unknown)";
+        info[@"targetIdentifier"] = targetUUID ?: @"";
+
+        if (targetUUID) {
+            id target = findNoteByIdentifier(targetUUID);
+            if (target) {
+                info[@"targetTitle"] = noteTitle(target);
+                // Find index in global list
+                NSArray *all = filteredNotes(nil);
+                for (NSUInteger i = 0; i < all.count; i++) {
+                    if (all[i] == target) {
+                        info[@"targetIndex"] = @(i + 1);
+                        break;
+                    }
+                }
+            } else {
+                info[@"targetTitle"] = @"(deleted or inaccessible)";
+            }
+        }
+        [links addObject:info];
+    }
+    return links;
+}
+
+void cmdNotesLinks(NSUInteger idx, NSString *folder, BOOL jsonOut) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found.\n", (unsigned long)idx);
+        return;
+    }
+
+    NSArray *links = outgoingLinks(note);
+
+    if (jsonOut) {
+        printf("[");
+        for (NSUInteger i = 0; i < links.count; i++) {
+            NSDictionary *l = links[i];
+            printf("%s{\"displayText\":\"%s\",\"targetTitle\":\"%s\"",
+                   i > 0 ? "," : "",
+                   [jsonEscapeString(l[@"displayText"]) UTF8String],
+                   [jsonEscapeString(l[@"targetTitle"] ?: @"") UTF8String]);
+            if (l[@"targetIndex"])
+                printf(",\"targetIndex\":%ld", (long)[l[@"targetIndex"] integerValue]);
+            if ([l[@"targetIdentifier"] length] > 0)
+                printf(",\"targetIdentifier\":\"%s\"",
+                       [jsonEscapeString(l[@"targetIdentifier"]) UTF8String]);
+            printf("}");
+        }
+        printf("]\n");
+        return;
+    }
+
+    NSString *title = noteTitle(note);
+    if (links.count == 0) {
+        printf("No outgoing links in \"%s\".\n", [title UTF8String]);
+        return;
+    }
+
+    printf("Outgoing links from \"%s\":\n\n", [title UTF8String]);
+    for (NSUInteger i = 0; i < links.count; i++) {
+        NSDictionary *l = links[i];
+        NSString *display = l[@"displayText"];
+        NSString *target = l[@"targetTitle"];
+        NSNumber *tIdx = l[@"targetIndex"];
+        if (tIdx) {
+            printf("  %lu. \"%s\" → \"%s\" (#%ld)\n",
+                   (unsigned long)(i + 1), [display UTF8String],
+                   [target UTF8String], (long)[tIdx integerValue]);
+        } else if (target) {
+            printf("  %lu. \"%s\" → %s\n",
+                   (unsigned long)(i + 1), [display UTF8String],
+                   [target UTF8String]);
+        } else {
+            printf("  %lu. \"%s\" → (unresolved)\n",
+                   (unsigned long)(i + 1), [display UTF8String]);
+        }
+    }
+    printf("\nTotal: %lu link(s)\n", (unsigned long)links.count);
+}
+
+void cmdNotesBacklinks(NSUInteger idx, NSString *folder, BOOL jsonOut) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found.\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *myIdentifier = noteIdentifier(note);
+    if (!myIdentifier) {
+        fprintf(stderr, "Error: Could not get identifier for note %lu.\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *title = noteTitle(note);
+    NSArray *all = fetchAllNotes();
+    NSMutableArray *backlinks = [NSMutableArray array];
+
+    for (id other in all) {
+        if (other == note) continue;
+        SEL sel = NSSelectorFromString(@"allNoteTextInlineAttachments");
+        if (![other respondsToSelector:sel]) continue;
+        id inlineAtts = ((id (*)(id, SEL))objc_msgSend)(other, sel);
+        if (!inlineAtts || [inlineAtts count] == 0) continue;
+
+        for (id att in inlineAtts) {
+            BOOL isLink = (BOOL)((NSInteger (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"isLinkAttachment"));
+            if (!isLink) continue;
+
+            NSString *tci = ((id (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"tokenContentIdentifier"));
+            NSString *targetUUID = uuidFromTokenContentIdentifier(tci);
+            if (targetUUID && [targetUUID caseInsensitiveCompare:myIdentifier] == NSOrderedSame) {
+                NSString *otherTitle = noteTitle(other);
+                // Find index
+                NSArray *listed = filteredNotes(nil);
+                NSNumber *otherIdx = nil;
+                for (NSUInteger i = 0; i < listed.count; i++) {
+                    if (listed[i] == other) {
+                        otherIdx = @(i + 1);
+                        break;
+                    }
+                }
+                [backlinks addObject:@{
+                    @"title": otherTitle,
+                    @"index": otherIdx ?: [NSNull null],
+                    @"identifier": noteIdentifier(other) ?: @""
+                }];
+                break; // one backlink per note
+            }
+        }
+    }
+
+    if (jsonOut) {
+        printf("[");
+        for (NSUInteger i = 0; i < backlinks.count; i++) {
+            NSDictionary *bl = backlinks[i];
+            printf("%s{\"title\":\"%s\"",
+                   i > 0 ? "," : "",
+                   [jsonEscapeString(bl[@"title"]) UTF8String]);
+            if (bl[@"index"] != [NSNull null])
+                printf(",\"index\":%ld", (long)[bl[@"index"] integerValue]);
+            printf("}");
+        }
+        printf("]\n");
+        return;
+    }
+
+    if (backlinks.count == 0) {
+        printf("No notes link to \"%s\".\n", [title UTF8String]);
+        return;
+    }
+
+    printf("Notes linking to \"%s\":\n\n", [title UTF8String]);
+    for (NSUInteger i = 0; i < backlinks.count; i++) {
+        NSDictionary *bl = backlinks[i];
+        if (bl[@"index"] != [NSNull null]) {
+            printf("  %lu. \"%s\" (#%ld)\n",
+                   (unsigned long)(i + 1),
+                   [bl[@"title"] UTF8String],
+                   (long)[bl[@"index"] integerValue]);
+        } else {
+            printf("  %lu. \"%s\"\n",
+                   (unsigned long)(i + 1), [bl[@"title"] UTF8String]);
+        }
+    }
+    printf("\nTotal: %lu note(s) link here\n", (unsigned long)backlinks.count);
+}
+
+void cmdNotesBacklinksAll(BOOL jsonOut) {
+    NSArray *all = fetchAllNotes();
+    // Build a map: noteIdentifier → {title, outgoing links}
+    NSMutableDictionary *linkMap = [NSMutableDictionary dictionary];
+
+    for (id note in all) {
+        SEL sel = NSSelectorFromString(@"allNoteTextInlineAttachments");
+        if (![note respondsToSelector:sel]) continue;
+        id inlineAtts = ((id (*)(id, SEL))objc_msgSend)(note, sel);
+        if (!inlineAtts || [inlineAtts count] == 0) continue;
+
+        NSString *srcId = noteIdentifier(note);
+        NSString *srcTitle = noteTitle(note);
+        if (!srcId) continue;
+
+        for (id att in inlineAtts) {
+            BOOL isLink = (BOOL)((NSInteger (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"isLinkAttachment"));
+            if (!isLink) continue;
+
+            NSString *tci = ((id (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"tokenContentIdentifier"));
+            NSString *targetUUID = uuidFromTokenContentIdentifier(tci);
+            if (!targetUUID) continue;
+
+            NSString *displayText = ((id (*)(id, SEL))objc_msgSend)(
+                att, NSSelectorFromString(@"altText"));
+
+            if (!linkMap[srcId]) {
+                linkMap[srcId] = [@{@"title": srcTitle, @"links": [NSMutableArray array]} mutableCopy];
+            }
+            [linkMap[srcId][@"links"] addObject:@{
+                @"displayText": displayText ?: @"(unknown)",
+                @"targetIdentifier": targetUUID
+            }];
+        }
+    }
+
+    if (jsonOut) {
+        printf("{");
+        BOOL first = YES;
+        for (NSString *srcId in linkMap) {
+            NSDictionary *info = linkMap[srcId];
+            if (!first) printf(",");
+            first = NO;
+            printf("\"%s\":{\"title\":\"%s\",\"links\":[",
+                   [jsonEscapeString(info[@"title"]) UTF8String],
+                   [jsonEscapeString(info[@"title"]) UTF8String]);
+            NSArray *links = info[@"links"];
+            for (NSUInteger i = 0; i < links.count; i++) {
+                NSDictionary *l = links[i];
+                id target = findNoteByIdentifier(l[@"targetIdentifier"]);
+                NSString *targetTitle = target ? noteTitle(target) : @"(unresolved)";
+                printf("%s{\"displayText\":\"%s\",\"targetTitle\":\"%s\"}",
+                       i > 0 ? "," : "",
+                       [jsonEscapeString(l[@"displayText"]) UTF8String],
+                       [jsonEscapeString(targetTitle) UTF8String]);
+            }
+            printf("]}");
+        }
+        printf("}\n");
+        return;
+    }
+
+    if (linkMap.count == 0) {
+        printf("No note-to-note links found.\n");
+        return;
+    }
+
+    printf("Note link graph (%lu notes with links):\n\n",
+           (unsigned long)linkMap.count);
+    for (NSString *srcId in linkMap) {
+        NSDictionary *info = linkMap[srcId];
+        printf("  \"%s\":\n", [info[@"title"] UTF8String]);
+        for (NSDictionary *l in info[@"links"]) {
+            id target = findNoteByIdentifier(l[@"targetIdentifier"]);
+            NSString *targetTitle = target ? noteTitle(target) : @"(unresolved)";
+            printf("    → \"%s\" (as \"%s\")\n",
+                   [targetTitle UTF8String],
+                   [l[@"displayText"] UTF8String]);
+        }
+    }
+}

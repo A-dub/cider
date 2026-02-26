@@ -511,7 +511,34 @@ cmd "$CIDER" settings
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Folder Management\n\n"
+printf "\n---\n\n## Section 9: Note Links / Backlinks\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Show outgoing links"
+IDX=$(find_note "CiderTest Alpha")
+printf 'Test notes have no >> links, so this shows the empty-links output.\n\n'
+cmd "$CIDER" notes links "$IDX"
+
+header "Show outgoing links (JSON)"
+cmd "$CIDER" notes links "$IDX" --json
+
+header "Show backlinks"
+cmd "$CIDER" notes backlinks "$IDX"
+
+header "Show backlinks (JSON)"
+cmd "$CIDER" notes backlinks "$IDX" --json
+
+header "Full link graph"
+printf 'Shows all note-to-note links across all notes (including real user notes).\n\n'
+cmd "$CIDER" notes backlinks --all
+
+header "Full link graph (JSON)"
+cmd "$CIDER" notes backlinks --all --json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 10: Folder Management\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -538,7 +565,7 @@ cmd "$CIDER" notes folder delete "NonexistentFolder99"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Tags\n\n"
+printf "\n---\n\n## Section 11: Tags\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -580,7 +607,7 @@ cmd "$CIDER" notes untag "$IDX" "nonexistent"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Pin / Unpin\n\n"
+printf "\n---\n\n## Section 12: Pin / Unpin\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -602,7 +629,7 @@ cmd "$CIDER" notes unpin "$IDX"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 13: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -631,7 +658,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 13: Attachments\n\n"
+printf "\n---\n\n## Section 14: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -678,7 +705,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 14: Move\n\n"
+printf "\n---\n\n## Section 15: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -704,7 +731,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 15: Delete\n\n"
+printf "\n---\n\n## Section 16: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -722,7 +749,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 16: Export\n\n"
+printf "\n---\n\n## Section 17: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -739,7 +766,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 17: Error Handling\n\n"
+printf "\n---\n\n## Section 18: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -767,7 +794,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 18: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 19: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

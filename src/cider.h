@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.10.0"
+#define VERSION "3.11.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +51,8 @@ id defaultFolder(void);
 // ─────────────────────────────────────────────────────────────────────────────
 
 NSString *noteURIString(id note);
+NSString *noteIdentifier(id note);
+id findNoteByIdentifier(NSString *identifier);
 NSInteger noteIntPK(id note);
 NSString *noteTitle(id note);
 NSString *folderName(id note);
@@ -141,6 +143,9 @@ void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position);
 NSArray *attachmentOrderFromCRDT(id note);
 NSString *attachmentNameByID(NSArray *atts, NSString *attID);
 void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx);
+void cmdNotesLinks(NSUInteger idx, NSString *folder, BOOL jsonOut);
+void cmdNotesBacklinks(NSUInteger idx, NSString *folder, BOOL jsonOut);
+void cmdNotesBacklinksAll(BOOL jsonOut);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reminders commands (reminders.m)
