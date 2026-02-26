@@ -1,0 +1,545 @@
+#!/bin/bash
+# ─────────────────────────────────────────────────────────────────────────────
+# cider test report — Markdown output showing before/after for every operation
+# ─────────────────────────────────────────────────────────────────────────────
+
+set -eu
+
+CIDER="${1:-./cider}"
+TEST_FOLDER="Cider Tests"
+CASE=0
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+header() {
+    CASE=$((CASE + 1))
+    printf "\n### Test %02d: %s\n\n" "$CASE" "$1"
+}
+
+section() {
+    printf "\n**%s**\n\n" "$1"
+}
+
+cmd() {
+    printf '```\n$ %s\n' "$*"
+    "$@" 2>&1 || true
+    printf '```\n'
+}
+
+find_note() {
+    "$CIDER" notes list --json 2>/dev/null \
+        | grep -v "ERROR:" \
+        | grep -o '"index":[0-9]*,"title":"'"$1"'"' \
+        | head -1 \
+        | grep -o '[0-9]*' \
+        | head -1
+}
+
+create_note() {
+    printf '%s\n%s' "$1" "$2" | "$CIDER" notes add --folder "$3" 2>/dev/null
+}
+
+delete_note() {
+    local idx
+    idx=$(find_note "$1") || true
+    if [ -n "$idx" ]; then
+        yes y 2>/dev/null | "$CIDER" notes delete "$idx" 2>/dev/null || true
+    fi
+}
+
+show_note() {
+    local idx
+    idx=$(find_note "$1") || true
+    if [ -n "$idx" ]; then
+        printf '```\n'
+        "$CIDER" notes show "$idx" 2>/dev/null | grep -v "ERROR: inflate"
+        printf '```\n'
+    else
+        printf '```\n(note not found)\n```\n'
+    fi
+}
+
+# ── Cleanup any prior test notes ─────────────────────────────────────────────
+
+for t in "CiderTest Alpha" "CiderTest Beta" "CiderTest Gamma" \
+         "CiderTest Delta" "CiderTest Attach" "CiderTest Regex" \
+         "CiderTest ReplAll1" "CiderTest ReplAll2" "CiderTest CaseTest" \
+         "CiderTest Piped" "Piped note content here"; do
+    delete_note "$t"
+done
+sleep 1
+
+# ═══════════════════════════════════════════════════════════════════════════════
+
+VERSION=$("$CIDER" --version 2>&1 | grep -o '[0-9]*\.[0-9]*\.[0-9]*')
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+cat <<EOF
+# Cider v${VERSION} — Test Report
+
+> Generated: ${DATE}
+>
+> This report shows **before and after** state for every cider operation,
+> demonstrating how each command works with real Apple Notes data.
+> All test notes are created in a "Cider Tests" folder and cleaned up afterwards.
+
+---
+
+## Section 1: Basic Operations
+
+EOF
+
+
+header "Version"
+cmd "$CIDER" --version
+
+
+header "Help (top-level)"
+cmd "$CIDER" --help
+
+
+header "Notes help"
+printf "Shows the full search/replace documentation with all flags and examples.\n\n"
+cmd "$CIDER" notes --help
+
+
+header "Create test notes"
+
+section "BEFORE: Notes in test folder"
+cmd "$CIDER" notes list -f "$TEST_FOLDER"
+
+section "COMMAND: Create 9 test notes via stdin pipe"
+printf '```\n'
+create_note "CiderTest Alpha" "This is the alpha note with some searchable content."  "$TEST_FOLDER"
+create_note "CiderTest Beta" "Beta note body. Contains the word pineapple."  "$TEST_FOLDER"
+create_note "CiderTest Gamma" "Gamma note for editing and replacing text."  "$TEST_FOLDER"
+create_note "CiderTest Delta" "Delta note that will be deleted."  "$TEST_FOLDER"
+create_note "CiderTest Attach" "Attachment test. BEFORE_ATTACH and AFTER_ATTACH markers."  "$TEST_FOLDER"
+create_note "CiderTest Regex" "Contact: alice@example.com and bob@test.org. Phone: 555-1234."  "$TEST_FOLDER"
+create_note "CiderTest ReplAll1" "The quick brown fox jumps over the lazy dog."  "$TEST_FOLDER"
+create_note "CiderTest ReplAll2" "The quick brown dog runs through the quick brown meadow."  "$TEST_FOLDER"
+create_note "CiderTest CaseTest" "TODO: fix the todo list and update TODO tracker."  "$TEST_FOLDER"
+printf '```\n'
+
+sleep 1
+
+section "AFTER: Notes in test folder"
+cmd "$CIDER" notes list -f "$TEST_FOLDER"
+
+
+header "List notes (JSON)"
+cmd "$CIDER" notes list -f "$TEST_FOLDER" --json
+
+
+header "List folders"
+cmd "$CIDER" notes folders
+
+
+header "List folders (JSON)"
+cmd "$CIDER" notes folders --json
+
+
+header "Show note by index"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes show "$IDX"
+
+
+header "Show note (JSON)"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes show "$IDX" --json
+
+
+header "Show note (bare number shorthand)"
+IDX=$(find_note "CiderTest Beta")
+printf 'Bare number shorthand: \`cider notes N\` is equivalent to \`cider notes show N\`.\n\n'
+cmd "$CIDER" notes "$IDX"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 2: Search\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Search — literal (title + body, default)"
+printf "By default, search checks **both title and body** (case-insensitive).\n\n"
+cmd "$CIDER" notes search "CiderTest Beta"
+
+
+header "Search — literal body content"
+printf 'Finds notes where the **body** contains "pineapple".\n\n'
+cmd "$CIDER" notes search "pineapple"
+
+
+header "Search — JSON output"
+cmd "$CIDER" notes search "CiderTest Alpha" --json
+
+
+header "Search — no results"
+cmd "$CIDER" notes search "xyznonexistent99"
+
+
+header "Search — \`--regex\` (find email addresses)"
+printf 'Pattern: \`[a-z]+@[a-z]+\\.[a-z]+\` matches email addresses in note content.\n\n'
+cmd "$CIDER" notes search '[a-z]+@[a-z]+\.[a-z]+' --regex
+
+
+header "Search — \`--regex\` (title pattern)"
+printf 'Pattern: \`CiderTest.*Repl\` matches ReplAll1 and ReplAll2 by title.\n\n'
+cmd "$CIDER" notes search 'CiderTest.*Repl' --regex
+
+
+header "Search — \`--regex\` (digit pattern)"
+printf 'Pattern: \`\\d{3}-\\d{4}\` finds phone numbers like 555-1234.\n\n'
+cmd "$CIDER" notes search '\d{3}-\d{4}' --regex
+
+
+header "Search — \`--title\` only"
+printf 'Searches **only the title**, not body content.\n\n'
+printf "Search for a title:\n\n"
+cmd "$CIDER" notes search "CiderTest Alpha" --title
+printf '\nSearch for body-only content with \`--title\` (should find nothing):\n\n'
+cmd "$CIDER" notes search "pineapple" --title
+
+
+header "Search — \`--body\` only"
+printf 'Searches **only the body**, not the title.\n\n'
+cmd "$CIDER" notes search "pineapple" --body
+
+
+header "Search — \`--folder\` scoping"
+printf 'Scope search to a specific folder.\n\n'
+printf "Search in test folder:\n\n"
+cmd "$CIDER" notes search "CiderTest" -f "$TEST_FOLDER"
+printf "\nSearch in a nonexistent folder:\n\n"
+cmd "$CIDER" notes search "CiderTest" -f "NonexistentFolder99"
+
+
+header "Search — \`--regex\` + \`--folder\`"
+printf 'Combine regex search with folder scoping.\n\n'
+cmd "$CIDER" notes search 'quick.*fox' --regex -f "$TEST_FOLDER"
+
+
+header "Search — \`--title\` and \`--body\` mutual exclusion"
+printf 'Using both flags returns an error.\n\n'
+cmd "$CIDER" notes search "test" --title --body
+
+
+header "Search — invalid regex"
+printf 'Malformed regex pattern returns a clear error.\n\n'
+cmd "$CIDER" notes search "[invalid" --regex
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 3: Replace (Single Note)\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Replace — literal (basic find & replace)"
+IDX=$(find_note "CiderTest Gamma")
+section "BEFORE"
+show_note "CiderTest Gamma"
+section "COMMAND"
+cmd "$CIDER" notes replace "$IDX" --find "editing" --replace "TESTING"
+section "AFTER"
+show_note "CiderTest Gamma"
+
+
+header "Replace — \`--regex\` with capture groups"
+IDX=$(find_note "CiderTest Regex")
+printf 'Regex: \`(\\w+)@(\\w+)\` with template \`[$1 at $2]\` masks email addresses using capture group backreferences.\n\n'
+section "BEFORE"
+show_note "CiderTest Regex"
+section "COMMAND"
+cmd "$CIDER" notes replace "$IDX" --find '(\w+)@(\w+)' --replace '[$1 at $2]' --regex
+section "AFTER"
+show_note "CiderTest Regex"
+
+
+header "Replace — \`-i\` (case-insensitive)"
+IDX=$(find_note "CiderTest CaseTest")
+printf 'Case-insensitive flag replaces **all case variants** (TODO, todo, TODO) with a single command.\n\n'
+section "BEFORE"
+show_note "CiderTest CaseTest"
+section "COMMAND"
+cmd "$CIDER" notes replace "$IDX" --find "todo" --replace "DONE" -i
+section "AFTER"
+show_note "CiderTest CaseTest"
+
+
+header "Replace — \`--regex\` + \`-i\` combined"
+IDX=$(find_note "CiderTest Regex")
+section "BEFORE"
+show_note "CiderTest Regex"
+section "COMMAND"
+printf 'Regex + case-insensitive: replace "phone" (matches "Phone") with "Tel".\n\n'
+cmd "$CIDER" notes replace "$IDX" --find 'phone' --replace 'Tel' --regex -i
+section "AFTER"
+show_note "CiderTest Regex"
+
+
+header "Replace — text not found (error)"
+IDX=$(find_note "CiderTest Gamma")
+cmd "$CIDER" notes replace "$IDX" --find "zzz_nonexistent_text" --replace "x"
+
+
+header "Replace — invalid regex (error)"
+IDX=$(find_note "CiderTest Gamma")
+cmd "$CIDER" notes replace "$IDX" --find "[invalid" --replace "x" --regex
+
+
+header "Replace — nonexistent note (error)"
+cmd "$CIDER" notes replace 99999 --find "x" --replace "y"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 4: Replace --all (Multi-Note)\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Replace \`--all --dry-run\` (preview only)"
+printf '`--dry-run` shows what **would** change without modifying anything.\n\n'
+section "BEFORE: ReplAll1"
+show_note "CiderTest ReplAll1"
+section "BEFORE: ReplAll2"
+show_note "CiderTest ReplAll2"
+section "COMMAND"
+cmd "$CIDER" notes replace --all --find "quick brown" --replace "slow grey" --folder "$TEST_FOLDER" --dry-run
+section "AFTER: ReplAll1 (unchanged)"
+show_note "CiderTest ReplAll1"
+section "AFTER: ReplAll2 (unchanged)"
+show_note "CiderTest ReplAll2"
+
+
+header "Replace \`--all --folder\` (with confirmation)"
+printf 'Replaces in **all matching notes** within a folder. Shows summary and requires `y/N` confirmation.\n\n'
+section "BEFORE: ReplAll1"
+show_note "CiderTest ReplAll1"
+section "BEFORE: ReplAll2"
+show_note "CiderTest ReplAll2"
+section "COMMAND"
+printf '```\n$ printf "y\\n" | cider notes replace --all --find "quick brown" --replace "slow grey" --folder "Cider Tests"\n'
+printf 'y\n' | "$CIDER" notes replace --all --find "quick brown" --replace "slow grey" --folder "$TEST_FOLDER" 2>&1
+printf '```\n'
+section "AFTER: ReplAll1"
+show_note "CiderTest ReplAll1"
+section "AFTER: ReplAll2"
+show_note "CiderTest ReplAll2"
+
+
+header "Replace \`--all --regex --folder\`"
+printf 'Regex replace across multiple notes. Pattern \`\\bslow\\b\` uses word boundary to match whole words only.\n\n'
+section "BEFORE: ReplAll1"
+show_note "CiderTest ReplAll1"
+section "BEFORE: ReplAll2"
+show_note "CiderTest ReplAll2"
+section "COMMAND"
+printf '```\n$ printf "y\\n" | cider notes replace --all --find "\\bslow\\b" --replace "fast" --regex --folder "Cider Tests"\n'
+printf 'y\n' | "$CIDER" notes replace --all --find '\bslow\b' --replace 'fast' --regex --folder "$TEST_FOLDER" 2>&1
+printf '```\n'
+section "AFTER: ReplAll1"
+show_note "CiderTest ReplAll1"
+section "AFTER: ReplAll2"
+show_note "CiderTest ReplAll2"
+
+
+header "Replace \`--all\` — no matches"
+cmd "$CIDER" notes replace --all --find "xyzNonexistent99" --replace "x" --folder "$TEST_FOLDER" --dry-run
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 5: Edit (CRDT)\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Edit via stdin pipe"
+IDX=$(find_note "CiderTest Gamma")
+section "BEFORE"
+show_note "CiderTest Gamma"
+section "COMMAND"
+printf '```\n$ echo "CiderTest Gamma\nGamma note fully rewritten via stdin pipe." | cider notes edit %s\n' "$IDX"
+printf 'CiderTest Gamma\nGamma note fully rewritten via stdin pipe.' | "$CIDER" notes edit "$IDX" 2>&1
+printf '```\n'
+section "AFTER"
+show_note "CiderTest Gamma"
+
+
+header "Add note via stdin pipe"
+section "BEFORE"
+cmd "$CIDER" notes search "CiderTest Piped"
+section "COMMAND"
+printf '```\n$ echo "CiderTest Piped\nThis note was created from a pipe." | cider notes add --folder "Cider Tests"\n'
+printf 'CiderTest Piped\nThis note was created from a pipe.' | "$CIDER" notes add --folder "$TEST_FOLDER" 2>&1
+printf '```\n'
+sleep 1
+section "AFTER"
+cmd "$CIDER" notes search "CiderTest Piped"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 6: Attachments\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+echo "test attachment content" > /tmp/cider_report_attach.txt
+
+header "Attach file to note"
+IDX=$(find_note "CiderTest Attach")
+section "BEFORE: Attachments"
+cmd "$CIDER" notes attachments "$IDX"
+section "COMMAND: Attach file"
+cmd "$CIDER" notes attach "$IDX" /tmp/cider_report_attach.txt
+sleep 1
+section "AFTER: Attachments"
+cmd "$CIDER" notes attachments "$IDX"
+
+
+header "List attachments (JSON)"
+IDX=$(find_note "CiderTest Attach")
+cmd "$CIDER" notes attachments "$IDX" --json
+
+
+header "Detach attachment"
+IDX=$(find_note "CiderTest Attach")
+section "BEFORE"
+cmd "$CIDER" notes attachments "$IDX"
+section "COMMAND"
+cmd "$CIDER" notes detach "$IDX" 1
+section "AFTER"
+cmd "$CIDER" notes attachments "$IDX"
+
+
+header "Attach at specific CRDT position"
+IDX=$(find_note "CiderTest Attach")
+echo "positional test" > /tmp/cider_report_pos.txt
+section "COMMAND"
+cmd "$CIDER" notes attach "$IDX" /tmp/cider_report_pos.txt --at 5
+sleep 1
+section "AFTER (JSON — note position field)"
+cmd "$CIDER" notes attachments "$IDX" --json
+printf "\nCleanup:\n\n"
+cmd "$CIDER" notes detach "$IDX" 1
+
+rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 7: Move\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Move note to different folder"
+IDX=$(find_note "CiderTest Beta")
+section "BEFORE"
+printf '```\n'
+"$CIDER" notes show "$IDX" --json 2>/dev/null | grep -o '"folder":"[^"]*"'
+printf '```\n'
+section "COMMAND"
+cmd "$CIDER" notes move "$IDX" Notes
+sleep 1
+IDX2=$(find_note "CiderTest Beta")
+if [ -n "$IDX2" ]; then
+    section "AFTER"
+    printf '```\n'
+    "$CIDER" notes show "$IDX2" --json 2>/dev/null | grep -o '"folder":"[^"]*"'
+    printf '```\n'
+    printf "\nCleanup — move back:\n\n"
+    cmd "$CIDER" notes move "$IDX2" "$TEST_FOLDER"
+    sleep 1
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 8: Delete\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Delete note"
+IDX=$(find_note "CiderTest Delta")
+section "BEFORE"
+cmd "$CIDER" notes search "CiderTest Delta"
+section "COMMAND"
+printf '```\n$ printf "y\\n" | cider notes delete %s\n' "$IDX"
+printf 'y\n' | "$CIDER" notes delete "$IDX" 2>&1
+printf '```\n'
+sleep 1
+section "AFTER"
+cmd "$CIDER" notes search "CiderTest Delta"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 9: Export\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Export all notes to HTML"
+EXPORT_DIR="/tmp/cider_report_export_$$"
+cmd "$CIDER" notes export "$EXPORT_DIR"
+printf "\nFiles created:\n\n"
+printf '```\n'
+printf "%s HTML files exported\n" "$(ls "$EXPORT_DIR"/*.html 2>/dev/null | wc -l | tr -d ' ')"
+printf "Sample files:\n"
+ls "$EXPORT_DIR"/*.html 2>/dev/null | head -5
+printf '```\n'
+rm -rf "$EXPORT_DIR"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 10: Error Handling\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Show nonexistent note"
+cmd "$CIDER" notes show 99999
+
+header "Replace in nonexistent note"
+cmd "$CIDER" notes replace 99999 --find "x" --replace "y"
+
+header "Detach from nonexistent note"
+cmd "$CIDER" notes detach 99999 1
+
+header "Attach nonexistent file"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes attach "$IDX" /nonexistent/file.txt
+
+header "Unknown command"
+cmd "$CIDER" bogus
+
+header "Unknown notes subcommand"
+cmd "$CIDER" notes bogus
+
+header "Missing replace arguments"
+cmd "$CIDER" notes replace 1 --find "x"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 11: Backward Compatibility\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Legacy \`-fl\` (folders)"
+cmd "$CIDER" notes -fl
+
+header "Legacy \`-v\` (view)"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes -v "$IDX"
+
+header "Legacy \`-s\` (search)"
+cmd "$CIDER" notes -s "CiderTest Beta"
+
+header "Legacy \`-f\` (folder filter)"
+cmd "$CIDER" notes -f "$TEST_FOLDER"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLEANUP
+# ─────────────────────────────────────────────────────────────────────────────
+
+for t in "CiderTest Alpha" "CiderTest Beta" "CiderTest Gamma" \
+         "CiderTest Delta" "CiderTest Attach" "CiderTest Regex" \
+         "CiderTest ReplAll1" "CiderTest ReplAll2" "CiderTest CaseTest" \
+         "CiderTest Piped" "Piped note content here"; do
+    delete_note "$t"
+done
+
+printf "\n---\n\n"
+printf "*Report complete — %d test cases demonstrated. All test notes cleaned up.*\n" "$CASE"
