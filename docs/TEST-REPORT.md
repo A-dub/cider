@@ -1,6 +1,6 @@
-# Cider v3.7.0 — Test Report
+# Cider v3.8.0 — Test Report
 
-> Generated: 2026-02-26 18:05:31
+> Generated: 2026-02-26 18:10:16
 >
 > This report shows **before and after** state for every cider operation,
 > demonstrating how each command works with real Apple Notes data.
@@ -15,14 +15,14 @@
 
 ```
 $ ./cider --version
-cider v3.7.0
+cider v3.8.0
 ```
 
 ### Test 02: Help (top-level)
 
 ```
 $ ./cider --help
-cider v3.7.0 — Apple Notes CLI with CRDT attachment support
+cider v3.8.0 — Apple Notes CLI with CRDT attachment support
 
 USAGE:
   cider notes [subcommand]   Notes operations
@@ -45,6 +45,9 @@ NOTES SUBCOMMANDS:
   tag <N> <tag>                       Add #tag to note N
   untag <N> <tag>                     Remove #tag from note N
   tags [--count] [--json]             List all unique tags
+  folder create <name> [--parent <p>] Create a new folder
+  folder delete <name>                Delete empty folder
+  folder rename <old> <new>           Rename folder
   replace <N> --find <s> --replace <s> [--regex] [-i]
                                        Find & replace in note N (full content)
   replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]
@@ -106,7 +109,7 @@ Shows the full search/replace documentation with all flags and examples.
 
 ```
 $ ./cider notes --help
-cider notes v3.7.0 — Apple Notes CLI
+cider notes v3.8.0 — Apple Notes CLI
 
 USAGE:
   cider notes                              List all notes
@@ -140,6 +143,21 @@ APPEND / PREPEND:
     echo "piped text" | cider notes append 3
     cider notes append 3 "no gap" --no-newline
     cider notes prepend 3 "text" -f "Work Notes"
+
+FOLDER MANAGEMENT:
+  cider notes folder create <name>           Create a new folder
+  cider notes folder create <name> --parent <p>  Nested folder
+  cider notes folder delete <name>           Delete empty folder
+  cider notes folder rename <old> <new>      Rename folder
+
+  Delete requires the folder to be empty (move/delete notes first).
+  Rename checks that the new name doesn't already exist.
+
+  Examples:
+    cider notes folder create "Work Notes"
+    cider notes folder create "Meetings" --parent "Work Notes"
+    cider notes folder delete "Old Stuff"
+    cider notes folder rename "Work" "Work Notes"
 
 TAGS:
   cider notes tag <N> <tag>           Add #tag to end of note
@@ -325,15 +343,15 @@ Total: 16 note(s)
 ```
 $ ./cider notes list -f Cider Tests --json
 [
-  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
+  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
   {"index":10,"title":"Live Refresh Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:24:58Z","modified":"2026-02-19T11:24:58Z"},
   {"index":11,"title":"AS Created Note","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:21:34Z","modified":"2026-02-19T11:21:34Z"},
   {"index":12,"title":"Serialize Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T10:58:40Z","modified":"2026-02-19T10:58:40Z"},
@@ -478,7 +496,7 @@ Found 1 note(s) matching "pineapple":
 ```
 $ ./cider notes search CiderTest Alpha --json
 [
-  {"index":1,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"}
+  {"index":1,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"}
 ]
 ```
 
@@ -1317,15 +1335,15 @@ Total: 16 note(s)
 ```
 $ ./cider notes list --json -f Cider Tests
 [
-  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
-  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:05:31Z","modified":"2026-02-26T23:05:31Z"},
+  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
+  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:10:17Z","modified":"2026-02-26T23:10:17Z"},
   {"index":10,"title":"Live Refresh Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:24:58Z","modified":"2026-02-19T11:24:58Z"},
   {"index":11,"title":"AS Created Note","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:21:34Z","modified":"2026-02-19T11:21:34Z"},
   {"index":12,"title":"Serialize Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T10:58:40Z","modified":"2026-02-19T10:58:40Z"},
@@ -1390,17 +1408,97 @@ Error: Invalid date 'not-a-date'. Use ISO 8601 (2024-01-15) or relative (today, 
 
 ---
 
-## Section 7: Tags
+## Section 7: Folder Management
 
 
-### Test 49: Add a tag
+### Test 49: Create a folder
+
+```
+$ ./cider notes folder create CiderTest Subfolder
+Created folder: "CiderTest Subfolder"
+```
+
+### Test 50: Create duplicate folder
+
+```
+$ ./cider notes folder create CiderTest Subfolder
+Folder "CiderTest Subfolder" already exists.
+```
+
+### Test 51: Rename folder
+
+```
+$ ./cider notes folder rename CiderTest Subfolder CiderTest Renamed
+Renamed folder: "CiderTest Subfolder" → "CiderTest Renamed"
+```
+
+### Test 52: List folders (shows renamed)
+
+```
+$ ./cider notes folders
+Folders:
+  Archive
+  Cider Tests
+  CiderSync Tests
+  CiderSync_Tests
+  CiderTest Renamed
+  Documents
+  Drafts
+  Finance
+  Gg
+  Gifts
+  Groceries
+  Hobbies
+  Home
+  Notes
+  Passwords
+  Phone Numbers
+  Places
+  Recently Deleted
+  Recipes
+  Relationship
+  TODO
+  TYPED BY CAL
+  Wedding
+  Work
+
+Total: 24 folder(s)
+```
+
+### Test 53: Delete empty folder
+
+```
+$ ./cider notes folder delete CiderTest Renamed
+Deleted folder: "CiderTest Renamed"
+```
+
+### Test 54: Delete non-empty folder (error)
+
+```
+$ ./cider notes folder delete Cider Tests
+Error: Folder "Cider Tests" has 11 note(s). Move or delete them first.
+```
+
+### Test 55: Delete nonexistent folder (error)
+
+```
+$ ./cider notes folder delete NonexistentFolder99
+Error: Folder "NonexistentFolder99" not found
+```
+
+---
+
+## Section 8: Tags
+
+
+### Test 56: Add a tag
 
 ```
 $ ./cider notes tag 9 project-x
 Added #project-x to note 9
 ```
 
-### Test 50: Show note with tag
+### Test 57: Show note with tag
 
 ```
 $ ./cider notes show 9
@@ -1414,21 +1512,21 @@ This is the alpha note with some searchable content.
 This line was appended. (suffix) #project-x
 ```
 
-### Test 51: Duplicate tag detection
+### Test 58: Duplicate tag detection
 
 ```
 $ ./cider notes tag 9 project-x
 Note 9 already has tag #project-x
 ```
 
-### Test 52: Add second tag
+### Test 59: Add second tag
 
 ```
 $ ./cider notes tag 9 important
 Added #important to note 9
 ```
 
-### Test 53: List all tags
+### Test 60: List all tags
 
 ```
 $ ./cider notes tags
@@ -1461,7 +1559,7 @@ $ ./cider notes tags
 Total: 25 unique tag(s)
 ```
 
-### Test 54: Tags with counts
+### Test 61: Tags with counts
 
 ```
 $ ./cider notes tags --count
@@ -1494,7 +1592,7 @@ $ ./cider notes tags --count
 Total: 25 unique tag(s)
 ```
 
-### Test 55: Tags JSON output
+### Test 62: Tags JSON output
 
 ```
 $ ./cider notes tags --json
@@ -1527,7 +1625,7 @@ $ ./cider notes tags --json
 ]
 ```
 
-### Test 56: Filter notes by tag
+### Test 63: Filter notes by tag
 
 ```
 $ ./cider notes list --tag project-x
@@ -1538,7 +1636,7 @@ $ ./cider notes list --tag project-x
 Total: 1 note(s)
 ```
 
-### Test 57: Remove a tag
+### Test 64: Remove a tag
 
 ```
 $ ./cider notes untag 9 project-x
@@ -1558,7 +1656,7 @@ This is the alpha note with some searchable content.
 This line was appended. (suffix) #important
 ```
 
-### Test 58: Remove nonexistent tag
+### Test 65: Remove nonexistent tag
 
 ```
 $ ./cider notes untag 9 nonexistent
@@ -1568,24 +1666,24 @@ Removed #important from note 9
 
 ---
 
-## Section 8: Pin / Unpin
+## Section 9: Pin / Unpin
 
 
-### Test 59: Pin a note
+### Test 66: Pin a note
 
 ```
 $ ./cider notes pin 9
 📌 Pinned note 9: "CiderTest Alpha"
 ```
 
-### Test 60: Pin already-pinned note
+### Test 67: Pin already-pinned note
 
 ```
 $ ./cider notes pin 9
 Note 9 is already pinned.
 ```
 
-### Test 61: List pinned notes
+### Test 68: List pinned notes
 
 ```
 $ ./cider notes list --pinned
@@ -1596,14 +1694,14 @@ $ ./cider notes list --pinned
 Total: 1 note(s)
 ```
 
-### Test 62: Unpin a note
+### Test 69: Unpin a note
 
 ```
 $ ./cider notes unpin 9
 📌 Unpinned note 9: "CiderTest Alpha"
 ```
 
-### Test 63: Unpin non-pinned note
+### Test 70: Unpin non-pinned note
 
 ```
 $ ./cider notes unpin 9
@@ -1612,10 +1710,10 @@ Note 9 is not pinned.
 
 ---
 
-## Section 9: Edit (CRDT)
+## Section 10: Edit (CRDT)
 
 
-### Test 64: Edit via stdin pipe
+### Test 71: Edit via stdin pipe
 
 
 **BEFORE**
@@ -1652,7 +1750,7 @@ CiderTest Gamma
 Gamma note fully rewritten via stdin pipe.
 ```
 
-### Test 65: Add note via stdin pipe
+### Test 72: Add note via stdin pipe
 
 
 **BEFORE**
@@ -1683,10 +1781,10 @@ Found 1 note(s) matching "CiderTest Piped":
 
 ---
 
-## Section 10: Attachments
+## Section 11: Attachments
 
 
-### Test 66: Attach file to note
+### Test 73: Attach file to note
 
 
 **BEFORE: Attachments**
@@ -1700,7 +1798,7 @@ No attachments in "CiderTest Attach"
 
 ```
 $ ./cider notes attach 6 /tmp/cider_report_attach.txt
-✓ Attachment inserted at position 73 in "CiderTest Attach" (id: 76AF5062-38F2-4054-A05C-7A621124A2C7)
+✓ Attachment inserted at position 73 in "CiderTest Attach" (id: 8BDC1D03-C5D4-4CD0-99E8-FDA34ED6442C)
 ```
 
 **AFTER: Attachments**
@@ -1711,14 +1809,14 @@ Attachments in "CiderTest Attach":
   1. [public.plain-text]  (public.plain-text, position 73)
 ```
 
-### Test 67: List attachments (JSON)
+### Test 74: List attachments (JSON)
 
 ```
 $ ./cider notes attachments 6 --json
-[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":73,"id":"76AF5062-38F2-4054-A05C-7A621124A2C7"}]
+[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":73,"id":"8BDC1D03-C5D4-4CD0-99E8-FDA34ED6442C"}]
 ```
 
-### Test 68: Detach attachment
+### Test 75: Detach attachment
 
 
 **BEFORE**
@@ -1743,21 +1841,21 @@ $ ./cider notes attachments 6
 No attachments in "CiderTest Attach"
 ```
 
-### Test 69: Attach at specific CRDT position
+### Test 76: Attach at specific CRDT position
 
 
 **COMMAND**
 
 ```
 $ ./cider notes attach 6 /tmp/cider_report_pos.txt --at 5
-✓ Attachment inserted at position 5 in "CiderTest Attach" (id: BF17BF79-C154-4871-BA6B-F5F5BC861220)
+✓ Attachment inserted at position 5 in "CiderTest Attach" (id: AF4A3C77-22F6-4222-AE73-25F3611D9E6F)
 ```
 
 **AFTER (JSON — note position field)**
 
 ```
 $ ./cider notes attachments 6 --json
-[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":5,"id":"BF17BF79-C154-4871-BA6B-F5F5BC861220"}]
+[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":5,"id":"AF4A3C77-22F6-4222-AE73-25F3611D9E6F"}]
 ```
 
 Cleanup:
@@ -1769,10 +1867,10 @@ $ ./cider notes detach 6 1
 
 ---
 
-## Section 11: Move
+## Section 12: Move
 
 
-### Test 70: Move note to different folder
+### Test 77: Move note to different folder
 
 
 **BEFORE**
@@ -1803,10 +1901,10 @@ Moved "CiderTest Beta" → "Cider Tests"
 
 ---
 
-## Section 12: Delete
+## Section 13: Delete
 
 
-### Test 71: Delete note
+### Test 78: Delete note
 
 
 **BEFORE**
@@ -1836,15 +1934,15 @@ No notes found matching "CiderTest Delta"
 
 ---
 
-## Section 13: Export
+## Section 14: Export
 
 
-### Test 72: Export all notes to HTML
+### Test 79: Export all notes to HTML
 
 ```
-$ ./cider notes export /tmp/cider_report_export_11935
-Exported 578 notes to: /tmp/cider_report_export_11935
-Index:    /tmp/cider_report_export_11935/index.html
+$ ./cider notes export /tmp/cider_report_export_14367
+Exported 578 notes to: /tmp/cider_report_export_14367
+Index:    /tmp/cider_report_export_14367/index.html
 ```
 
 Files created:
@@ -1852,47 +1950,47 @@ Files created:
 ```
 579 HTML files exported
 Sample files:
-/tmp/cider_report_export_11935/0001_CiderTest Beta.html
-/tmp/cider_report_export_11935/0002_CiderTest Piped.html
-/tmp/cider_report_export_11935/0003_CiderTest CaseTest.html
-/tmp/cider_report_export_11935/0004_CiderTest ReplAll2.html
-/tmp/cider_report_export_11935/0005_CiderTest ReplAll1.html
+/tmp/cider_report_export_14367/0001_CiderTest Beta.html
+/tmp/cider_report_export_14367/0002_CiderTest Piped.html
+/tmp/cider_report_export_14367/0003_CiderTest CaseTest.html
+/tmp/cider_report_export_14367/0004_CiderTest ReplAll2.html
+/tmp/cider_report_export_14367/0005_CiderTest ReplAll1.html
 ```
 
 ---
 
-## Section 14: Error Handling
+## Section 15: Error Handling
 
 
-### Test 73: Show nonexistent note
+### Test 80: Show nonexistent note
 
 ```
 $ ./cider notes show 99999
 Error: Note 99999 not found
 ```
 
-### Test 74: Replace in nonexistent note
+### Test 81: Replace in nonexistent note
 
 ```
 $ ./cider notes replace 99999 --find x --replace y
 Error: Note 99999 not found
 ```
 
-### Test 75: Detach from nonexistent note
+### Test 82: Detach from nonexistent note
 
 ```
 $ ./cider notes detach 99999 1
 Error: Note 99999 not found
 ```
 
-### Test 76: Attach nonexistent file
+### Test 83: Attach nonexistent file
 
 ```
 $ ./cider notes attach 9 /nonexistent/file.txt
 Error: File not found: /nonexistent/file.txt
 ```
 
-### Test 77: Unknown command
+### Test 84: Unknown command
 
 ```
 $ ./cider bogus
@@ -1900,12 +1998,12 @@ Unknown command: bogus
 Run 'cider --help' for usage.
 ```
 
-### Test 78: Unknown notes subcommand
+### Test 85: Unknown notes subcommand
 
 ```
 $ ./cider notes bogus
 Unknown notes subcommand: bogus
-cider notes v3.7.0 — Apple Notes CLI
+cider notes v3.8.0 — Apple Notes CLI
 
 USAGE:
   cider notes                              List all notes
@@ -1939,6 +2037,21 @@ APPEND / PREPEND:
     echo "piped text" | cider notes append 3
     cider notes append 3 "no gap" --no-newline
     cider notes prepend 3 "text" -f "Work Notes"
+
+FOLDER MANAGEMENT:
+  cider notes folder create <name>           Create a new folder
+  cider notes folder create <name> --parent <p>  Nested folder
+  cider notes folder delete <name>           Delete empty folder
+  cider notes folder rename <old> <new>      Rename folder
+
+  Delete requires the folder to be empty (move/delete notes first).
+  Rename checks that the new name doesn't already exist.
+
+  Examples:
+    cider notes folder create "Work Notes"
+    cider notes folder create "Meetings" --parent "Work Notes"
+    cider notes folder delete "Old Stuff"
+    cider notes folder rename "Work" "Work Notes"
 
 TAGS:
   cider notes tag <N> <tag>           Add #tag to end of note
@@ -2059,7 +2172,7 @@ Interactive mode: if <N> is omitted from edit/delete/move/show/replace/attach,
 you'll be prompted to enter it (when stdin is a terminal).
 ```
 
-### Test 79: Missing replace arguments
+### Test 86: Missing replace arguments
 
 ```
 $ ./cider notes replace 1 --find x
@@ -2068,10 +2181,10 @@ Usage: cider notes replace <N> --find <text> --replace <text> [--regex] [-i]
 
 ---
 
-## Section 15: Backward Compatibility
+## Section 16: Backward Compatibility
 
 
-### Test 80: Legacy `-fl` (folders)
+### Test 87: Legacy `-fl` (folders)
 
 ```
 $ ./cider notes -fl
@@ -2103,7 +2216,7 @@ Folders:
 Total: 23 folder(s)
 ```
 
-### Test 81: Legacy `-v` (view)
+### Test 88: Legacy `-v` (view)
 
 ```
 $ ./cider notes -v 9
@@ -2117,7 +2230,7 @@ This is the alpha note with some searchable content.
 This line was appended. (suffix)
 ```
 
-### Test 82: Legacy `-s` (search)
+### Test 89: Legacy `-s` (search)
 
 ```
 $ ./cider notes -s CiderTest Beta
@@ -2128,7 +2241,7 @@ Found 1 note(s) matching "CiderTest Beta":
   1 CiderTest Beta                             Cider Tests           
 ```
 
-### Test 83: Legacy `-f` (folder filter)
+### Test 90: Legacy `-f` (folder filter)
 
 ```
 $ ./cider notes -f Cider Tests
@@ -2165,4 +2278,4 @@ Delete note "CiderTest Piped"? (y/N) Deleted: "CiderTest Piped"
 
 ---
 
-*Report complete — 83 test cases demonstrated. All test notes cleaned up.*
+*Report complete — 90 test cases demonstrated. All test notes cleaned up.*

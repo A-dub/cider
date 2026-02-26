@@ -728,6 +728,42 @@ assert_contains "CiderTest" "search --after today: finds test notes"
 run "$CIDER" notes search "CiderTest" --before "2020-01-01"
 assert_contains "No notes found" "search --before old date: no results"
 
+# ── Test: folder management ─────────────────────────────────────────────────
+
+log "Testing: folder management"
+
+# Create folder
+run "$CIDER" notes folder create "CiderTest Subfolder"
+assert_rc 0 "folder create: exits 0"
+assert_contains "Created folder" "folder create: success message"
+
+# Create duplicate (should say already exists)
+run "$CIDER" notes folder create "CiderTest Subfolder"
+assert_contains "already exists" "folder create: duplicate detection"
+
+# Rename folder
+run "$CIDER" notes folder rename "CiderTest Subfolder" "CiderTest Renamed"
+assert_rc 0 "folder rename: exits 0"
+assert_contains "Renamed" "folder rename: success message"
+
+# Verify renamed folder appears in list
+run "$CIDER" notes folders
+assert_contains "CiderTest Renamed" "folder rename: appears in folders list"
+
+# Delete folder
+run "$CIDER" notes folder delete "CiderTest Renamed"
+assert_rc 0 "folder delete: exits 0"
+assert_contains "Deleted folder" "folder delete: success message"
+
+# Delete nonexistent folder
+run "$CIDER" notes folder delete "NonexistentFolder99"
+assert_rc 1 "folder delete: nonexistent folder returns exit 1"
+
+# Delete non-empty folder
+run "$CIDER" notes folder delete "$TEST_FOLDER"
+assert_rc 1 "folder delete: non-empty folder returns exit 1"
+assert_contains "note(s)" "folder delete: shows note count error"
+
 # ── Test: tags ──────────────────────────────────────────────────────────────
 
 log "Testing: tags"

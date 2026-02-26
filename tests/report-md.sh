@@ -443,7 +443,34 @@ cmd "$CIDER" notes list --after "not-a-date"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 7: Tags\n\n"
+printf "\n---\n\n## Section 7: Folder Management\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Create a folder"
+cmd "$CIDER" notes folder create "CiderTest Subfolder"
+
+header "Create duplicate folder"
+cmd "$CIDER" notes folder create "CiderTest Subfolder"
+
+header "Rename folder"
+cmd "$CIDER" notes folder rename "CiderTest Subfolder" "CiderTest Renamed"
+
+header "List folders (shows renamed)"
+cmd "$CIDER" notes folders
+
+header "Delete empty folder"
+cmd "$CIDER" notes folder delete "CiderTest Renamed"
+
+header "Delete non-empty folder (error)"
+cmd "$CIDER" notes folder delete "$TEST_FOLDER"
+
+header "Delete nonexistent folder (error)"
+cmd "$CIDER" notes folder delete "NonexistentFolder99"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 8: Tags\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -485,7 +512,7 @@ cmd "$CIDER" notes untag "$IDX" "nonexistent"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 8: Pin / Unpin\n\n"
+printf "\n---\n\n## Section 9: Pin / Unpin\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -507,7 +534,7 @@ cmd "$CIDER" notes unpin "$IDX"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 10: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -536,7 +563,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Attachments\n\n"
+printf "\n---\n\n## Section 11: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -583,7 +610,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Move\n\n"
+printf "\n---\n\n## Section 12: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -609,7 +636,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Delete\n\n"
+printf "\n---\n\n## Section 13: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -627,7 +654,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 13: Export\n\n"
+printf "\n---\n\n## Section 14: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -644,7 +671,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 14: Error Handling\n\n"
+printf "\n---\n\n## Section 15: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -672,7 +699,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 15: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 16: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

@@ -1229,6 +1229,94 @@ void cmdNotesTags(BOOL withCounts, BOOL jsonOutput) {
     printf("\nTotal: %lu unique tag(s)\n", (unsigned long)sortedTags.count);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Folder commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+int cmdFolderCreate(NSString *name, NSString *parentName) {
+    // Check if folder already exists
+    id existing = findOrCreateFolder(name, NO);
+    if (existing) {
+        printf("Folder \"%s\" already exists.\n", [name UTF8String]);
+        return 0;
+    }
+
+    id folder = findOrCreateFolder(name, YES);
+    if (!folder) {
+        fprintf(stderr, "Error: Could not create folder \"%s\"\n", [name UTF8String]);
+        return 1;
+    }
+
+    // Set parent if specified
+    if (parentName) {
+        id parent = findOrCreateFolder(parentName, NO);
+        if (!parent) {
+            fprintf(stderr, "Error: Parent folder \"%s\" not found\n",
+                    [parentName UTF8String]);
+            [g_moc rollback];
+            return 1;
+        }
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            folder, NSSelectorFromString(@"setParent:"), parent);
+    }
+
+    if (!saveContext()) return 1;
+    printf("Created folder: \"%s\"", [name UTF8String]);
+    if (parentName) printf(" (in \"%s\")", [parentName UTF8String]);
+    printf("\n");
+    return 0;
+}
+
+int cmdFolderDelete(NSString *name) {
+    id folder = findOrCreateFolder(name, NO);
+    if (!folder) {
+        fprintf(stderr, "Error: Folder \"%s\" not found\n", [name UTF8String]);
+        return 1;
+    }
+
+    // Check if folder has notes
+    NSUInteger noteCount = 0;
+    SEL countSel = NSSelectorFromString(@"visibleNotesCount");
+    if ([folder respondsToSelector:countSel]) {
+        noteCount = ((NSUInteger (*)(id, SEL))objc_msgSend)(folder, countSel);
+    }
+    if (noteCount > 0) {
+        fprintf(stderr, "Error: Folder \"%s\" has %lu note(s). Move or delete them first.\n",
+                [name UTF8String], (unsigned long)noteCount);
+        return 1;
+    }
+
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        folder, NSSelectorFromString(@"setMarkedForDeletion:"), YES);
+
+    if (!saveContext()) return 1;
+    printf("Deleted folder: \"%s\"\n", [name UTF8String]);
+    return 0;
+}
+
+int cmdFolderRename(NSString *oldName, NSString *newName) {
+    id folder = findOrCreateFolder(oldName, NO);
+    if (!folder) {
+        fprintf(stderr, "Error: Folder \"%s\" not found\n", [oldName UTF8String]);
+        return 1;
+    }
+
+    // Check if new name already exists
+    id existing = findOrCreateFolder(newName, NO);
+    if (existing) {
+        fprintf(stderr, "Error: Folder \"%s\" already exists\n", [newName UTF8String]);
+        return 1;
+    }
+
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        folder, NSSelectorFromString(@"setTitle:"), newName);
+
+    if (!saveContext()) return 1;
+    printf("Renamed folder: \"%s\" → \"%s\"\n", [oldName UTF8String],
+           [newName UTF8String]);
+    return 0;
+}
+
 void cmdNotesExport(NSString *exportPath) {
     NSArray *notes = fetchAllNotes();
     if (!notes || notes.count == 0) {

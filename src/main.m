@@ -36,6 +36,9 @@ void printHelp(void) {
 "  tag <N> <tag>                       Add #tag to note N\n"
 "  untag <N> <tag>                     Remove #tag from note N\n"
 "  tags [--count] [--json]             List all unique tags\n"
+"  folder create <name> [--parent <p>] Create a new folder\n"
+"  folder delete <name>                Delete empty folder\n"
+"  folder rename <old> <new>           Rename folder\n"
 "  replace <N> --find <s> --replace <s> [--regex] [-i]\n"
 "                                       Find & replace in note N (full content)\n"
 "  replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]\n"
@@ -128,6 +131,21 @@ void printNotesHelp(void) {
 "    echo \"piped text\" | cider notes append 3\n"
 "    cider notes append 3 \"no gap\" --no-newline\n"
 "    cider notes prepend 3 \"text\" -f \"Work Notes\"\n"
+"\n"
+"FOLDER MANAGEMENT:\n"
+"  cider notes folder create <name>           Create a new folder\n"
+"  cider notes folder create <name> --parent <p>  Nested folder\n"
+"  cider notes folder delete <name>           Delete empty folder\n"
+"  cider notes folder rename <old> <new>      Rename folder\n"
+"\n"
+"  Delete requires the folder to be empty (move/delete notes first).\n"
+"  Rename checks that the new name doesn't already exist.\n"
+"\n"
+"  Examples:\n"
+"    cider notes folder create \"Work Notes\"\n"
+"    cider notes folder create \"Meetings\" --parent \"Work Notes\"\n"
+"    cider notes folder delete \"Old Stuff\"\n"
+"    cider notes folder rename \"Work\" \"Work Notes\"\n"
 "\n"
 "TAGS:\n"
 "  cider notes tag <N> <tag>           Add #tag to end of note\n"
@@ -545,6 +563,41 @@ int main(int argc, char *argv[]) {
                 if (!idx) idx = promptNoteIndex(@"unpin", folder);
                 if (!idx) return 1;
                 return cmdNotesUnpin(idx, folder);
+
+            // ── cider notes folder ──
+            } else if ([sub isEqualToString:@"folder"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider notes folder create|delete|rename ...\n");
+                    return 1;
+                }
+                NSString *action = [NSString stringWithUTF8String:argv[3]];
+                if ([action isEqualToString:@"create"]) {
+                    if (argc < 5) {
+                        fprintf(stderr, "Usage: cider notes folder create <name> [--parent <p>]\n");
+                        return 1;
+                    }
+                    NSString *name = [NSString stringWithUTF8String:argv[4]];
+                    NSString *parent = argValue(argc, argv, 5, "--parent", NULL);
+                    return cmdFolderCreate(name, parent);
+                } else if ([action isEqualToString:@"delete"]) {
+                    if (argc < 5) {
+                        fprintf(stderr, "Usage: cider notes folder delete <name>\n");
+                        return 1;
+                    }
+                    NSString *name = [NSString stringWithUTF8String:argv[4]];
+                    return cmdFolderDelete(name);
+                } else if ([action isEqualToString:@"rename"]) {
+                    if (argc < 6) {
+                        fprintf(stderr, "Usage: cider notes folder rename <old> <new>\n");
+                        return 1;
+                    }
+                    NSString *oldName = [NSString stringWithUTF8String:argv[4]];
+                    NSString *newName = [NSString stringWithUTF8String:argv[5]];
+                    return cmdFolderRename(oldName, newName);
+                } else {
+                    fprintf(stderr, "Unknown folder action: %s\n", [action UTF8String]);
+                    return 1;
+                }
 
             // ── cider notes tag ──
             } else if ([sub isEqualToString:@"tag"]) {
