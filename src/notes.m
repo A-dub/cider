@@ -1045,6 +1045,79 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdSettings(BOOL jsonOutput) {
+    NSDictionary *settings = loadCiderSettings();
+
+    if (jsonOutput) {
+        printf("{\n");
+        NSArray *keys = [[settings allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        for (NSUInteger i = 0; i < keys.count; i++) {
+            printf("  \"%s\":\"%s\"%s\n",
+                   [jsonEscapeString(keys[i]) UTF8String],
+                   [jsonEscapeString(settings[keys[i]]) UTF8String],
+                   (i + 1 < keys.count) ? "," : "");
+        }
+        printf("}\n");
+        return;
+    }
+
+    if (settings.count == 0) {
+        printf("No settings configured.\n");
+        printf("Set one with: cider settings set <key> <value>\n");
+        return;
+    }
+
+    printf("Cider Settings:\n\n");
+    NSArray *keys = [[settings allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *key in keys) {
+        printf("  %-25s %s\n", [key UTF8String], [settings[key] UTF8String]);
+    }
+}
+
+int cmdSettingsGet(NSString *key) {
+    NSString *value = getCiderSetting(key);
+    if (!value) {
+        fprintf(stderr, "Setting '%s' not found.\n", [key UTF8String]);
+        return 1;
+    }
+    printf("%s\n", [value UTF8String]);
+    return 0;
+}
+
+int cmdSettingsSet(NSString *key, NSString *value) {
+    if (setCiderSetting(key, value) != 0) {
+        fprintf(stderr, "Error: Failed to set '%s'\n", [key UTF8String]);
+        return 1;
+    }
+    printf("Set %s = %s\n", [[key lowercaseString] UTF8String], [value UTF8String]);
+    return 0;
+}
+
+int cmdSettingsReset(void) {
+    NSDictionary *settings = loadCiderSettings();
+    if (settings.count == 0) {
+        printf("No settings to reset.\n");
+        return 0;
+    }
+
+    // Find and delete the settings note
+    NSArray *notes = filteredNotes(@"Cider Templates");
+    for (id note in notes) {
+        if ([noteTitle(note) isEqualToString:@"Cider Settings"]) {
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(
+                note, NSSelectorFromString(@"setMarkedForDeletion:"), YES);
+            if (!saveContext()) return 1;
+            printf("Settings reset to defaults.\n");
+            return 0;
+        }
+    }
+    return 0;
+}
+
 int cmdNotesPin(NSUInteger idx, NSString *folder) {
     id note = noteAtIndex(idx, folder);
     if (!note) {

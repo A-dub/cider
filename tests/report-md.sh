@@ -474,7 +474,44 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 8: Folder Management\n\n"
+printf "\n---\n\n## Section 8: Settings\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Show settings (initially empty)"
+cmd "$CIDER" settings
+
+header "Set a setting"
+cmd "$CIDER" settings set default_sort modified
+
+header "Set another setting"
+cmd "$CIDER" settings set default_folder "Work Notes"
+
+header "Show all settings"
+cmd "$CIDER" settings
+
+header "Get a single setting"
+cmd "$CIDER" settings get default_sort
+
+header "Settings JSON output"
+cmd "$CIDER" settings --json
+
+header "Get nonexistent key (error)"
+cmd "$CIDER" settings get nonexistent_key
+
+header "Overwrite existing setting"
+cmd "$CIDER" settings set default_sort created
+printf "\nVerify:\n\n"
+cmd "$CIDER" settings get default_sort
+
+header "Reset settings"
+cmd "$CIDER" settings reset
+printf "\nVerify:\n\n"
+cmd "$CIDER" settings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 9: Folder Management\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -501,7 +538,7 @@ cmd "$CIDER" notes folder delete "NonexistentFolder99"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Tags\n\n"
+printf "\n---\n\n## Section 10: Tags\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -543,7 +580,7 @@ cmd "$CIDER" notes untag "$IDX" "nonexistent"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Pin / Unpin\n\n"
+printf "\n---\n\n## Section 11: Pin / Unpin\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -565,7 +602,7 @@ cmd "$CIDER" notes unpin "$IDX"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 12: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -594,7 +631,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Attachments\n\n"
+printf "\n---\n\n## Section 13: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -641,7 +678,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 13: Move\n\n"
+printf "\n---\n\n## Section 14: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -667,7 +704,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 14: Delete\n\n"
+printf "\n---\n\n## Section 15: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -685,7 +722,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 15: Export\n\n"
+printf "\n---\n\n## Section 16: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -702,7 +739,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 16: Error Handling\n\n"
+printf "\n---\n\n## Section 17: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -730,7 +767,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 17: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 18: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

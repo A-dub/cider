@@ -18,6 +18,7 @@ void printHelp(void) {
 "USAGE:\n"
 "  cider notes [subcommand]   Notes operations\n"
 "  cider templates [sub]      Template management\n"
+"  cider settings [sub]       Cider configuration\n"
 "  cider rem [subcommand]     Reminders operations\n"
 "  cider sync [subcommand]    Bidirectional Notes <-> Markdown sync\n"
 "  cider --version            Show version\n"
@@ -78,6 +79,23 @@ void printHelp(void) {
 "    cider sync watch                      Continuous sync (polls every 2s)\n"
 "    cider sync watch --interval 10        Poll every 10 seconds\n"
 "    cider sync backup                     Manual backup of Notes database\n"
+"\n"
+"SETTINGS:\n"
+"  cider settings                     Show current settings\n"
+"  cider settings get <key>           Get a single setting\n"
+"  cider settings set <key> <value>   Set a setting\n"
+"  cider settings reset               Reset all settings\n"
+"  cider settings --json              JSON output\n"
+"\n"
+"  Settings are stored in a \"Cider Settings\" note. Available keys:\n"
+"    default_folder    Default folder for new notes\n"
+"    default_sort      Default sort order (title|modified|created)\n"
+"    editor            Preferred editor ($EDITOR override)\n"
+"\n"
+"  Examples:\n"
+"    cider settings set default_folder \"Work Notes\"\n"
+"    cider settings set default_sort modified\n"
+"    cider settings get default_folder\n"
 "\n"
 "BACKWARDS COMPAT (old flags still work):\n"
 "  cider notes -fl             →  cider notes folders\n"
@@ -970,6 +988,49 @@ int main(int argc, char *argv[]) {
                 return cmdTemplatesDelete(name);
             } else {
                 fprintf(stderr, "Unknown templates subcommand: %s\n", argv[2]);
+                return 1;
+            }
+            return 0;
+        }
+
+        // ── settings ─────────────────────────────────────────────────────────
+        if ([cmd isEqualToString:@"settings"]) {
+            if (!initNotesContext()) return 1;
+
+            if (argc == 2) {
+                BOOL jsonOut = argHasFlag(argc, argv, 2, "--json", NULL);
+                cmdSettings(jsonOut);
+                return 0;
+            }
+
+            NSString *sub = [NSString stringWithUTF8String:argv[2]];
+
+            if ([sub isEqualToString:@"--json"]) {
+                cmdSettings(YES);
+            } else if ([sub isEqualToString:@"get"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider settings get <key>\n");
+                    return 1;
+                }
+                NSString *key = [NSString stringWithUTF8String:argv[3]];
+                return cmdSettingsGet(key);
+            } else if ([sub isEqualToString:@"set"]) {
+                if (argc < 5) {
+                    fprintf(stderr, "Usage: cider settings set <key> <value>\n");
+                    return 1;
+                }
+                NSString *key = [NSString stringWithUTF8String:argv[3]];
+                // Join remaining args as value (allows spaces without quoting)
+                NSMutableArray *valParts = [NSMutableArray array];
+                for (int i = 4; i < argc; i++) {
+                    [valParts addObject:[NSString stringWithUTF8String:argv[i]]];
+                }
+                NSString *value = [valParts componentsJoinedByString:@" "];
+                return cmdSettingsSet(key, value);
+            } else if ([sub isEqualToString:@"reset"]) {
+                return cmdSettingsReset();
+            } else {
+                fprintf(stderr, "Unknown settings subcommand: %s\n", argv[2]);
                 return 1;
             }
             return 0;

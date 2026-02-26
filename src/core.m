@@ -510,6 +510,116 @@ NSDate *parseDateString(NSString *str) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cider Settings helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+static NSString *kSettingsFolder = @"Cider Templates";
+static NSString *kSettingsTitle = @"Cider Settings";
+
+static id findSettingsNote(void) {
+    NSArray *notes = filteredNotes(kSettingsFolder);
+    for (id note in notes) {
+        if ([noteTitle(note) isEqualToString:kSettingsTitle]) {
+            return note;
+        }
+    }
+    return nil;
+}
+
+NSDictionary *loadCiderSettings(void) {
+    id note = findSettingsNote();
+    if (!note) return @{};
+
+    NSString *raw = noteRawText(note);
+    if (!raw) return @{};
+
+    NSMutableDictionary *settings = [NSMutableDictionary dictionary];
+    NSArray *lines = [raw componentsSeparatedByString:@"\n"];
+    for (NSString *line in lines) {
+        NSRange colonRange = [line rangeOfString:@": "];
+        if (colonRange.location == NSNotFound) continue;
+        NSString *key = [[line substringToIndex:colonRange.location]
+                          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSString *value = [[line substringFromIndex:colonRange.location + 2]
+                            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (key.length > 0 && ![key isEqualToString:kSettingsTitle]) {
+            settings[[key lowercaseString]] = value;
+        }
+    }
+    return settings;
+}
+
+NSString *getCiderSetting(NSString *key) {
+    NSDictionary *settings = loadCiderSettings();
+    return settings[[key lowercaseString]];
+}
+
+int setCiderSetting(NSString *key, NSString *value) {
+    id note = findSettingsNote();
+    NSString *normalizedKey = [key lowercaseString];
+
+    if (!note) {
+        // Create settings note
+        id folder = findOrCreateFolder(kSettingsFolder, YES);
+        if (!folder) return 1;
+        id account = [folder valueForKey:@"account"];
+
+        note = [NSEntityDescription
+            insertNewObjectForEntityForName:@"ICNote"
+                     inManagedObjectContext:g_moc];
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            note, NSSelectorFromString(@"setFolder:"), folder);
+        if (account) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                note, NSSelectorFromString(@"setAccount:"), account);
+        }
+        [note setValue:[NSDate date] forKey:@"creationDate"];
+        [note setValue:[NSDate date] forKey:@"modificationDate"];
+
+        id noteDataEntity = [NSEntityDescription
+            insertNewObjectForEntityForName:@"ICNoteData"
+                     inManagedObjectContext:g_moc];
+        [note setValue:noteDataEntity forKey:@"noteData"];
+
+        NSString *content = [NSString stringWithFormat:@"%@\n%@: %@",
+                             kSettingsTitle, normalizedKey, value];
+        id mergeStr = noteMergeableString(note);
+        if (!mergeStr) return 1;
+        ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"insertString:atIndex:"),
+            content, (NSUInteger)0);
+        ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+        ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+        ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+        ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+        return saveContext() ? 0 : 1;
+    }
+
+    // Update existing settings note
+    NSString *raw = noteRawText(note);
+    NSString *linePattern = [NSString stringWithFormat:@"%@: ", normalizedKey];
+    NSMutableArray *lines = [[raw componentsSeparatedByString:@"\n"] mutableCopy];
+    BOOL found = NO;
+    for (NSUInteger i = 0; i < lines.count; i++) {
+        NSString *line = lines[i];
+        NSString *trimmed = [line stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceCharacterSet]];
+        if ([[trimmed lowercaseString] hasPrefix:[linePattern lowercaseString]]) {
+            lines[i] = [NSString stringWithFormat:@"%@: %@", normalizedKey, value];
+            found = YES;
+            break;
+        }
+    }
+    if (!found) {
+        [lines addObject:[NSString stringWithFormat:@"%@: %@", normalizedKey, value]];
+    }
+    NSString *newText = [lines componentsJoinedByString:@"\n"];
+    if (!applyCRDTEdit(note, raw, newText)) return 1;
+    return saveContext() ? 0 : 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AppleScript helper
 // ─────────────────────────────────────────────────────────────────────────────
 

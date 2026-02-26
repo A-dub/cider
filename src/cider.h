@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.9.0"
+#define VERSION "3.10.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,6 +82,9 @@ id noteAtIndex(NSUInteger idx, NSString *folder);
 // JSON / formatting / utility helpers (core.m)
 // ─────────────────────────────────────────────────────────────────────────────
 
+NSDictionary *loadCiderSettings(void);
+NSString *getCiderSetting(NSString *key);
+int setCiderSetting(NSString *key, NSString *value);
 NSString *jsonEscapeString(NSString *s);
 NSString *truncStr(NSString *s, NSUInteger maxLen);
 NSString *padRight(NSString *s, NSUInteger width);
@@ -113,6 +116,10 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
 int  cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 int  cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 void cmdNotesDebug(NSUInteger idx, NSString *folder);
+void cmdSettings(BOOL jsonOutput);
+int  cmdSettingsGet(NSString *key);
+int  cmdSettingsSet(NSString *key, NSString *value);
+int  cmdSettingsReset(void);
 int  cmdNotesPin(NSUInteger idx, NSString *folder);
 int  cmdNotesUnpin(NSUInteger idx, NSString *folder);
 NSArray *extractTags(NSString *text);

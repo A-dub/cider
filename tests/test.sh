@@ -118,7 +118,8 @@ cleanup() {
                  "Piped note content here" \
                  "CiderTest Regex" "CiderTest ReplAll1" "CiderTest ReplAll2" \
                  "CiderTest Append" "CiderTest Prepend" \
-                 "CiderTest Template" "Template body line 1"; do
+                 "CiderTest Template" "Template body line 1" \
+                 "Cider Settings"; do
         delete_note_as "$title"
     done
 }
@@ -862,6 +863,57 @@ else
     # Clean up remaining tag
     run "$CIDER" notes untag "$IDX" "test-tag"
 fi
+
+# ── Test: settings ─────────────────────────────────────────────────────
+
+log "Testing: settings"
+
+# Show settings (initially empty)
+run "$CIDER" settings
+assert_rc 0 "settings: exits 0"
+assert_contains "No settings" "settings: shows no settings message"
+
+# Set a setting
+run "$CIDER" settings set default_sort modified
+assert_rc 0 "settings set: exits 0"
+assert_contains "Set" "settings set: success message"
+
+# Get a setting
+run "$CIDER" settings get default_sort
+assert_rc 0 "settings get: exits 0"
+assert_contains "modified" "settings get: returns correct value"
+
+# Set another setting
+run "$CIDER" settings set default_folder "Work Notes"
+assert_rc 0 "settings set second: exits 0"
+
+# Show all settings
+run "$CIDER" settings
+assert_contains "default_sort" "settings: shows default_sort"
+assert_contains "default_folder" "settings: shows default_folder"
+
+# JSON output
+run "$CIDER" settings --json
+assert_contains '"default_sort"' "settings --json: JSON output"
+assert_contains '"modified"' "settings --json: JSON value"
+
+# Get nonexistent key
+run "$CIDER" settings get nonexistent_key
+assert_rc 1 "settings get: nonexistent key returns exit 1"
+
+# Overwrite existing setting
+run "$CIDER" settings set default_sort created
+run "$CIDER" settings get default_sort
+assert_contains "created" "settings set: overwrites existing value"
+
+# Reset settings
+run "$CIDER" settings reset
+assert_rc 0 "settings reset: exits 0"
+assert_contains "reset" "settings reset: success message"
+
+# Verify settings cleared
+run "$CIDER" settings
+assert_contains "No settings" "settings reset: settings cleared"
 
 # ── Test: pin / unpin ───────────────────────────────────────────────────────
 
