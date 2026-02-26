@@ -17,6 +17,7 @@ void printHelp(void) {
 "\n"
 "USAGE:\n"
 "  cider notes [subcommand]   Notes operations\n"
+"  cider templates [sub]      Template management\n"
 "  cider rem [subcommand]     Reminders operations\n"
 "  cider sync [subcommand]    Bidirectional Notes <-> Markdown sync\n"
 "  cider --version            Show version\n"
@@ -27,7 +28,7 @@ void printHelp(void) {
 "       [--pinned]                      List notes (default when no subcommand)\n"
 "  show <N> [--json]                   View note N  (also: cider notes <N>)\n"
 "  folders [--json]                    List all folders\n"
-"  add [--folder <f>]                  Add note (stdin or $EDITOR)\n"
+"  add [--folder <f>] [--template <t>] Add note (stdin, $EDITOR, or template)\n"
 "  edit <N>                            Edit note N (CRDT — preserves attachments!)\n"
 "  delete <N>                          Delete note N\n"
 "  move <N> <folder>                   Move note N to folder\n"
@@ -131,6 +132,23 @@ void printNotesHelp(void) {
 "    echo \"piped text\" | cider notes append 3\n"
 "    cider notes append 3 \"no gap\" --no-newline\n"
 "    cider notes prepend 3 \"text\" -f \"Work Notes\"\n"
+"\n"
+"TEMPLATES:\n"
+"  cider templates list                    List templates\n"
+"  cider templates show <name>             View template content\n"
+"  cider templates add                     Create new template ($EDITOR)\n"
+"  cider templates delete <name>           Delete template\n"
+"  cider notes add --template <name>       Create note from template\n"
+"\n"
+"  Templates are stored as notes in the \"Cider Templates\" folder.\n"
+"  When creating from a template, the body is pre-filled in $EDITOR.\n"
+"\n"
+"  Examples:\n"
+"    cider templates add                   Create a template in $EDITOR\n"
+"    cider templates list                  List all templates\n"
+"    cider templates show \"Meeting Notes\"  View template content\n"
+"    cider notes add --template \"Meeting Notes\"  Create note from template\n"
+"    cider notes add --template \"TODO\" -f Work   Template + target folder\n"
 "\n"
 "FOLDER MANAGEMENT:\n"
 "  cider notes folder create <name>           Create a new folder\n"
@@ -391,6 +409,10 @@ int main(int argc, char *argv[]) {
             // ── cider notes add ──
             } else if ([sub isEqualToString:@"add"]) {
                 NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                NSString *tmpl = argValue(argc, argv, 3, "--template", NULL);
+                if (tmpl) {
+                    return cmdNotesAddFromTemplate(tmpl, folder);
+                }
                 cmdNotesAdd(folder);
 
             // ── cider notes edit ──
@@ -912,6 +934,42 @@ int main(int argc, char *argv[]) {
             } else {
                 fprintf(stderr, "Unknown notes subcommand: %s\n", argv[2]);
                 printNotesHelp();
+                return 1;
+            }
+            return 0;
+        }
+
+        // ── templates ────────────────────────────────────────────────────────
+        if ([cmd isEqualToString:@"templates"]) {
+            if (!initNotesContext()) return 1;
+
+            if (argc == 2) {
+                cmdTemplatesList();
+                return 0;
+            }
+
+            NSString *sub = [NSString stringWithUTF8String:argv[2]];
+
+            if ([sub isEqualToString:@"list"]) {
+                cmdTemplatesList();
+            } else if ([sub isEqualToString:@"show"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider templates show <name>\n");
+                    return 1;
+                }
+                NSString *name = [NSString stringWithUTF8String:argv[3]];
+                return cmdTemplatesShow(name);
+            } else if ([sub isEqualToString:@"add"]) {
+                cmdTemplatesAdd();
+            } else if ([sub isEqualToString:@"delete"]) {
+                if (argc < 4) {
+                    fprintf(stderr, "Usage: cider templates delete <name>\n");
+                    return 1;
+                }
+                NSString *name = [NSString stringWithUTF8String:argv[3]];
+                return cmdTemplatesDelete(name);
+            } else {
+                fprintf(stderr, "Unknown templates subcommand: %s\n", argv[2]);
                 return 1;
             }
             return 0;

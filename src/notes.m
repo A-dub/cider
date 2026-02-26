@@ -1317,6 +1317,171 @@ int cmdFolderRename(NSString *oldName, NSString *newName) {
     return 0;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Template commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+static NSString *kTemplateFolder = @"Cider Templates";
+
+void cmdTemplatesList(void) {
+    NSArray *notes = filteredNotes(kTemplateFolder);
+    if (notes.count == 0) {
+        printf("No templates found. Create one with: cider templates add\n");
+        return;
+    }
+    printf("Templates (in \"%s\" folder):\n\n", [kTemplateFolder UTF8String]);
+    NSUInteger i = 1;
+    for (id note in notes) {
+        printf("  %lu. %s\n", (unsigned long)i, [noteTitle(note) UTF8String]);
+        i++;
+    }
+    printf("\nTotal: %lu template(s)\n", (unsigned long)notes.count);
+}
+
+int cmdTemplatesShow(NSString *name) {
+    NSArray *notes = filteredNotes(kTemplateFolder);
+    for (id note in notes) {
+        NSString *title = noteTitle(note);
+        if ([title caseInsensitiveCompare:name] == NSOrderedSame) {
+            NSString *raw = noteRawText(note);
+            // Skip the title (first line)
+            NSRange nlRange = [raw rangeOfString:@"\n"];
+            if (nlRange.location != NSNotFound) {
+                printf("%s\n", [[raw substringFromIndex:nlRange.location + 1] UTF8String]);
+            } else {
+                printf("(empty template body)\n");
+            }
+            return 0;
+        }
+    }
+    fprintf(stderr, "Error: Template \"%s\" not found\n", [name UTF8String]);
+    return 1;
+}
+
+void cmdTemplatesAdd(void) {
+    // Ensure template folder exists
+    findOrCreateFolder(kTemplateFolder, YES);
+    saveContext();
+
+    cmdNotesAdd(kTemplateFolder);
+}
+
+int cmdTemplatesDelete(NSString *name) {
+    NSArray *notes = filteredNotes(kTemplateFolder);
+    for (id note in notes) {
+        NSString *title = noteTitle(note);
+        if ([title caseInsensitiveCompare:name] == NSOrderedSame) {
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(
+                note, NSSelectorFromString(@"setMarkedForDeletion:"), YES);
+            if (!saveContext()) return 1;
+            printf("Deleted template: \"%s\"\n", [title UTF8String]);
+            return 0;
+        }
+    }
+    fprintf(stderr, "Error: Template \"%s\" not found\n", [name UTF8String]);
+    return 1;
+}
+
+int cmdNotesAddFromTemplate(NSString *templateName, NSString *targetFolder) {
+    // Find the template
+    NSArray *templates = filteredNotes(kTemplateFolder);
+    id templateNote = nil;
+    for (id note in templates) {
+        if ([noteTitle(note) caseInsensitiveCompare:templateName] == NSOrderedSame) {
+            templateNote = note;
+            break;
+        }
+    }
+    if (!templateNote) {
+        fprintf(stderr, "Error: Template \"%s\" not found\n", [templateName UTF8String]);
+        return 1;
+    }
+
+    // Get template body (skip title line)
+    NSString *raw = noteRawText(templateNote);
+    NSString *body = @"";
+    NSRange nlRange = [raw rangeOfString:@"\n"];
+    if (nlRange.location != NSNotFound) {
+        body = [raw substringFromIndex:nlRange.location + 1];
+    }
+
+    // Open in $EDITOR with template content pre-filled
+    NSString *tmp = [NSTemporaryDirectory()
+                     stringByAppendingPathComponent:@"cider_template.txt"];
+    [body writeToFile:tmp atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    if (isatty(STDIN_FILENO)) {
+        NSString *editor = [[[NSProcessInfo processInfo] environment]
+                            objectForKey:@"EDITOR"] ?: @"vi";
+        system([[NSString stringWithFormat:@"%@ %@", editor, tmp] UTF8String]);
+    }
+
+    NSError *err = nil;
+    NSString *content = [NSString stringWithContentsOfFile:tmp
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:&err];
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+
+    if (!content || [[content stringByTrimmingCharactersInSet:
+                      [NSCharacterSet whitespaceAndNewlineCharacterSet]] length] == 0) {
+        printf("Aborted: empty note.\n");
+        return 1;
+    }
+
+    id folder = targetFolder
+        ? findOrCreateFolder(targetFolder, YES)
+        : defaultFolder();
+    if (!folder) {
+        fprintf(stderr, "Error: Could not find or create folder\n");
+        return 1;
+    }
+    id account = [folder valueForKey:@"account"];
+
+    id newNote = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICNote"
+                 inManagedObjectContext:g_moc];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newNote, NSSelectorFromString(@"setFolder:"), folder);
+    if (account) {
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            newNote, NSSelectorFromString(@"setAccount:"), account);
+    }
+    [newNote setValue:[NSDate date] forKey:@"creationDate"];
+    [newNote setValue:[NSDate date] forKey:@"modificationDate"];
+
+    id noteDataEntity = [NSEntityDescription
+        insertNewObjectForEntityForName:@"ICNoteData"
+                 inManagedObjectContext:g_moc];
+    [newNote setValue:noteDataEntity forKey:@"noteData"];
+
+    id mergeStr = noteMergeableString(newNote);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string for new note\n");
+        [g_moc rollback];
+        return 1;
+    }
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertString:atIndex:"),
+        content, (NSUInteger)0);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(
+        newNote, NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(
+        newNote, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    if (saveContext()) {
+        printf("Created note from template \"%s\": \"%s\"\n",
+               [templateName UTF8String],
+               [noteTitle(newNote) UTF8String]);
+        return 0;
+    }
+    fprintf(stderr, "Error: Failed to save new note\n");
+    return 1;
+}
+
 void cmdNotesExport(NSString *exportPath) {
     NSArray *notes = fetchAllNotes();
     if (!notes || notes.count == 0) {

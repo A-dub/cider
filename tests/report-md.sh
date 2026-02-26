@@ -443,7 +443,38 @@ cmd "$CIDER" notes list --after "not-a-date"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 7: Folder Management\n\n"
+printf "\n---\n\n## Section 7: Templates\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# Create a template
+printf 'CiderTest Template\nMeeting Date: \nAttendees: \n\n## Agenda\n\n## Notes\n\n## Action Items\n' | "$CIDER" notes add --folder "Cider Templates" 2>/dev/null
+sleep 1
+
+header "List templates"
+cmd "$CIDER" templates list
+
+header "Show template content"
+cmd "$CIDER" templates show "CiderTest Template"
+
+header "Create note from template"
+cmd "$CIDER" notes add --template "CiderTest Template" --folder "$TEST_FOLDER"
+
+header "Show nonexistent template (error)"
+cmd "$CIDER" templates show "Nonexistent"
+
+header "Delete template"
+cmd "$CIDER" templates delete "CiderTest Template"
+
+# Clean up template-created note
+TIDX=$("$CIDER" notes list --json -f "$TEST_FOLDER" 2>/dev/null | grep -v "ERROR:" | grep -o '"index":[0-9]*,"title":"Meeting Date' | head -1 | grep -o '[0-9]*' | head -1)
+if [ -n "$TIDX" ]; then
+    yes y 2>/dev/null | "$CIDER" notes delete "$TIDX" 2>/dev/null || true
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 8: Folder Management\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -470,7 +501,7 @@ cmd "$CIDER" notes folder delete "NonexistentFolder99"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 8: Tags\n\n"
+printf "\n---\n\n## Section 9: Tags\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -512,7 +543,7 @@ cmd "$CIDER" notes untag "$IDX" "nonexistent"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Pin / Unpin\n\n"
+printf "\n---\n\n## Section 10: Pin / Unpin\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -534,7 +565,7 @@ cmd "$CIDER" notes unpin "$IDX"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 11: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -563,7 +594,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Attachments\n\n"
+printf "\n---\n\n## Section 12: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -610,7 +641,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Move\n\n"
+printf "\n---\n\n## Section 13: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -636,7 +667,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 13: Delete\n\n"
+printf "\n---\n\n## Section 14: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -654,7 +685,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 14: Export\n\n"
+printf "\n---\n\n## Section 15: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -671,7 +702,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 15: Error Handling\n\n"
+printf "\n---\n\n## Section 16: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -699,7 +730,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 16: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 17: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

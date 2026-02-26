@@ -117,7 +117,8 @@ cleanup() {
                  "CiderTest Delta" "CiderTest Attach" "CiderTest Piped" \
                  "Piped note content here" \
                  "CiderTest Regex" "CiderTest ReplAll1" "CiderTest ReplAll2" \
-                 "CiderTest Append" "CiderTest Prepend"; do
+                 "CiderTest Append" "CiderTest Prepend" \
+                 "CiderTest Template" "Template body line 1"; do
         delete_note_as "$title"
     done
 }
@@ -727,6 +728,49 @@ assert_contains "CiderTest" "search --after today: finds test notes"
 # Search with --before old date
 run "$CIDER" notes search "CiderTest" --before "2020-01-01"
 assert_contains "No notes found" "search --before old date: no results"
+
+# ── Test: templates ──────────────────────────────────────────────────────────
+
+log "Testing: templates"
+
+# Create a template via stdin
+printf 'CiderTest Template\nTemplate body line 1\nTemplate body line 2' | "$CIDER" notes add --folder "Cider Templates" 2>/dev/null
+sleep 1
+
+# List templates
+run "$CIDER" templates list
+assert_rc 0 "templates list: exits 0"
+assert_contains "CiderTest Template" "templates list: shows template"
+
+# Show template
+run "$CIDER" templates show "CiderTest Template"
+assert_rc 0 "templates show: exits 0"
+assert_contains "Template body line 1" "templates show: shows body"
+
+# Show nonexistent template
+run "$CIDER" templates show "Nonexistent Template"
+assert_rc 1 "templates show: nonexistent returns exit 1"
+
+# Create note from template (non-interactive uses template body as-is)
+"$CIDER" notes add --template "CiderTest Template" --folder "$TEST_FOLDER" 2>/dev/null
+sleep 1
+run "$CIDER" notes list -f "$TEST_FOLDER"
+assert_contains "Template body line 1" "add --template: created note from template"
+
+# Delete note created from template
+TIDX=$(find_note "Template body line 1")
+if [ -n "$TIDX" ]; then
+    yes y 2>/dev/null | "$CIDER" notes delete "$TIDX" 2>/dev/null || true
+fi
+
+# Delete template
+run "$CIDER" templates delete "CiderTest Template"
+assert_rc 0 "templates delete: exits 0"
+assert_contains "Deleted template" "templates delete: success message"
+
+# Delete nonexistent template
+run "$CIDER" templates delete "Nonexistent Template"
+assert_rc 1 "templates delete: nonexistent returns exit 1"
 
 # ── Test: folder management ─────────────────────────────────────────────────
 
