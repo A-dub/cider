@@ -38,6 +38,7 @@ void printHelp(void) {
 "  tag <N> <tag>                       Add #tag to note N\n"
 "  untag <N> <tag>                     Remove #tag from note N\n"
 "  tags [--count] [--json]             List all unique tags\n"
+"  watch [options]                    Stream note change events\n"
 "  links <N> [--json]                 Show outgoing note links\n"
 "  backlinks <N> [--json]             Show notes linking to note N\n"
 "  backlinks --all [--json]           Full link graph\n"
@@ -170,6 +171,22 @@ void printNotesHelp(void) {
 "    cider templates show \"Meeting Notes\"  View template content\n"
 "    cider notes add --template \"Meeting Notes\"  Create note from template\n"
 "    cider notes add --template \"TODO\" -f Work   Template + target folder\n"
+"\n"
+"WATCH / EVENTS:\n"
+"  cider notes watch                          Stream note change events\n"
+"  cider notes watch --folder <f>             Watch specific folder\n"
+"  cider notes watch --interval 5             Poll interval (default 2s)\n"
+"  cider notes watch --json                   JSON event stream for AI piping\n"
+"\n"
+"  Polls for note changes and streams events: created, modified, deleted.\n"
+"  Reads watch_interval from Cider Settings if no --interval flag.\n"
+"\n"
+"  Examples:\n"
+"    cider notes watch                        Watch all notes (2s poll)\n"
+"    cider notes watch -f \"Work Notes\"         Watch specific folder\n"
+"    cider notes watch --interval 10           Poll every 10 seconds\n"
+"    cider notes watch --json                  JSON events for piping\n"
+"    cider notes watch --json | while read e; do echo \"$e\" | jq; done\n"
 "\n"
 "NOTE LINKS / BACKLINKS:\n"
 "  cider notes links <N> [--json]             Show outgoing note links\n"
@@ -620,6 +637,21 @@ int main(int argc, char *argv[]) {
                 if (!idx) idx = promptNoteIndex(@"unpin", folder);
                 if (!idx) return 1;
                 return cmdNotesUnpin(idx, folder);
+
+            // ── cider notes watch ──
+            } else if ([sub isEqualToString:@"watch"]) {
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                NSTimeInterval interval = 2.0;
+                NSString *intStr = argValue(argc, argv, 3, "--interval", NULL);
+                if (intStr) interval = [intStr doubleValue];
+                if (!intStr) {
+                    NSString *settingInterval = getCiderSetting(@"watch_interval");
+                    if (settingInterval) interval = [settingInterval doubleValue];
+                }
+                if (interval < 0.5) interval = 0.5;
+                cmdNotesWatch(folder, interval, jsonOut);
+                return 0; // never reached (infinite loop)
 
             // ── cider notes links ──
             } else if ([sub isEqualToString:@"links"]) {

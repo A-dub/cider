@@ -2256,3 +2256,100 @@ void cmdNotesBacklinksAll(BOOL jsonOut) {
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Watch / Events
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdNotesWatch(NSString *folder, NSTimeInterval interval, BOOL jsonOutput) {
+    // Handle SIGINT gracefully
+    signal(SIGINT, SIG_DFL);
+
+    printf("Watching for note changes");
+    if (folder) printf(" in \"%s\"", [folder UTF8String]);
+    printf(" (interval: %.0fs, Ctrl-C to stop)\n\n", interval);
+    fflush(stdout);
+
+    // Build initial snapshot: {noteURI → {title, modDate}}
+    NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
+    NSArray *notes = filteredNotes(folder);
+    for (id note in notes) {
+        NSString *uri = noteURIString(note);
+        NSDate *mod = [note valueForKey:@"modificationDate"];
+        NSString *title = noteTitle(note);
+        snapshot[uri] = @{@"title": title, @"modified": mod ?: [NSDate date]};
+    }
+
+    while (1) {
+        [NSThread sleepForTimeInterval:interval];
+
+        // Re-fetch notes (need to refresh the context)
+        @try {
+            [g_moc refreshAllObjects];
+        } @catch (NSException *e) {
+            // refreshAllObjects may not be available
+        }
+
+        NSArray *current = filteredNotes(folder);
+        NSMutableDictionary *newSnapshot = [NSMutableDictionary dictionary];
+        NSMutableSet *seenURIs = [NSMutableSet set];
+
+        NSDateFormatter *timeFmt = [[NSDateFormatter alloc] init];
+        timeFmt.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+
+        for (id note in current) {
+            NSString *uri = noteURIString(note);
+            NSDate *mod = [note valueForKey:@"modificationDate"];
+            NSString *title = noteTitle(note);
+            [seenURIs addObject:uri];
+            newSnapshot[uri] = @{@"title": title, @"modified": mod ?: [NSDate date]};
+
+            NSDictionary *prev = snapshot[uri];
+            if (!prev) {
+                // New note
+                NSString *time = [timeFmt stringFromDate:mod ?: [NSDate date]];
+                if (jsonOutput) {
+                    printf("{\"event\":\"created\",\"title\":\"%s\",\"time\":\"%s\"}\n",
+                           [jsonEscapeString(title) UTF8String],
+                           [time UTF8String]);
+                } else {
+                    printf("[%s] created: \"%s\"\n", [time UTF8String], [title UTF8String]);
+                }
+                fflush(stdout);
+            } else {
+                NSDate *prevMod = prev[@"modified"];
+                if (mod && prevMod && [mod compare:prevMod] != NSOrderedSame) {
+                    // Modified note
+                    NSString *time = [timeFmt stringFromDate:mod];
+                    if (jsonOutput) {
+                        printf("{\"event\":\"modified\",\"title\":\"%s\",\"time\":\"%s\"}\n",
+                               [jsonEscapeString(title) UTF8String],
+                               [time UTF8String]);
+                    } else {
+                        printf("[%s] modified: \"%s\"\n", [time UTF8String], [title UTF8String]);
+                    }
+                    fflush(stdout);
+                }
+            }
+        }
+
+        // Check for deleted notes
+        for (NSString *uri in snapshot) {
+            if (![seenURIs containsObject:uri]) {
+                NSDictionary *prev = snapshot[uri];
+                NSString *title = prev[@"title"];
+                NSString *time = [timeFmt stringFromDate:[NSDate date]];
+                if (jsonOutput) {
+                    printf("{\"event\":\"deleted\",\"title\":\"%s\",\"time\":\"%s\"}\n",
+                           [jsonEscapeString(title) UTF8String],
+                           [time UTF8String]);
+                } else {
+                    printf("[%s] deleted: \"%s\"\n", [time UTF8String], [title UTF8String]);
+                }
+                fflush(stdout);
+            }
+        }
+
+        snapshot = newSnapshot;
+    }
+}

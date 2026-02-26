@@ -864,6 +864,40 @@ else
     run "$CIDER" notes untag "$IDX" "test-tag"
 fi
 
+# ── Test: watch ────────────────────────────────────────────────────────
+
+log "Testing: watch"
+
+# Start watch in background, let it run briefly, then kill
+"$CIDER" notes watch --interval 1 > /tmp/cider_watch_$$.txt 2>&1 &
+WATCH_PID=$!
+sleep 2
+kill $WATCH_PID 2>/dev/null || true
+wait $WATCH_PID 2>/dev/null || true
+OUT=$(cat /tmp/cider_watch_$$.txt)
+assert_contains "Watching" "watch: shows watching message"
+
+# Watch with --folder
+"$CIDER" notes watch --interval 1 -f "$TEST_FOLDER" > /tmp/cider_watch2_$$.txt 2>&1 &
+WATCH_PID=$!
+sleep 2
+kill $WATCH_PID 2>/dev/null || true
+wait $WATCH_PID 2>/dev/null || true
+OUT=$(cat /tmp/cider_watch2_$$.txt)
+assert_contains "Watching" "watch --folder: shows watching message"
+assert_contains "$TEST_FOLDER" "watch --folder: shows folder name"
+
+# Watch with --json (just verify it starts)
+"$CIDER" notes watch --interval 1 --json > /tmp/cider_watch3_$$.txt 2>&1 &
+WATCH_PID=$!
+sleep 2
+kill $WATCH_PID 2>/dev/null || true
+wait $WATCH_PID 2>/dev/null || true
+OUT=$(cat /tmp/cider_watch3_$$.txt)
+assert_contains "Watching" "watch --json: starts correctly"
+
+rm -f /tmp/cider_watch_$$.txt /tmp/cider_watch2_$$.txt /tmp/cider_watch3_$$.txt
+
 # ── Test: links / backlinks ────────────────────────────────────────────
 
 log "Testing: links / backlinks"

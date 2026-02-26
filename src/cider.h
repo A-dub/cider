@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.11.0"
+#define VERSION "3.12.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +146,7 @@ void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx);
 void cmdNotesLinks(NSUInteger idx, NSString *folder, BOOL jsonOut);
 void cmdNotesBacklinks(NSUInteger idx, NSString *folder, BOOL jsonOut);
 void cmdNotesBacklinksAll(BOOL jsonOut);
+void cmdNotesWatch(NSString *folder, NSTimeInterval interval, BOOL jsonOutput);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reminders commands (reminders.m)
