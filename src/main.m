@@ -33,6 +33,9 @@ void printHelp(void) {
 "  move <N> <folder>                   Move note N to folder\n"
 "  pin <N>                             Pin note N\n"
 "  unpin <N>                           Unpin note N\n"
+"  tag <N> <tag>                       Add #tag to note N\n"
+"  untag <N> <tag>                     Remove #tag from note N\n"
+"  tags [--count] [--json]             List all unique tags\n"
 "  replace <N> --find <s> --replace <s> [--regex] [-i]\n"
 "                                       Find & replace in note N (full content)\n"
 "  replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]\n"
@@ -126,6 +129,23 @@ void printNotesHelp(void) {
 "    cider notes append 3 \"no gap\" --no-newline\n"
 "    cider notes prepend 3 \"text\" -f \"Work Notes\"\n"
 "\n"
+"TAGS:\n"
+"  cider notes tag <N> <tag>           Add #tag to end of note\n"
+"  cider notes untag <N> <tag>         Remove all occurrences of #tag\n"
+"  cider notes tags [--count] [--json] List all unique tags across all notes\n"
+"  cider notes list --tag <tag>        Filter notes containing #tag\n"
+"  cider notes search <q> --tag <tag>  Combine search + tag filter\n"
+"\n"
+"  Tags are #word patterns in note text (Apple Notes native hashtags).\n"
+"  Auto-prepends # if omitted. Case-insensitive matching.\n"
+"\n"
+"  Examples:\n"
+"    cider notes tag 3 \"project-x\"         Add #project-x to note 3\n"
+"    cider notes untag 3 \"#project-x\"      Remove #project-x from note 3\n"
+"    cider notes tags --count              Show tags with note counts\n"
+"    cider notes list --tag project-x      List notes with #project-x\n"
+"    cider notes search \"meeting\" --tag work  Search + tag filter\n"
+"\n"
 "PIN / UNPIN:\n"
 "  cider notes pin <N> [-f <folder>]\n"
 "  cider notes unpin <N> [-f <folder>]\n"
@@ -153,6 +173,7 @@ void printNotesHelp(void) {
 "  --before <date>             Notes modified before date\n"
 "  --sort created|modified|title  Sort order (default: title)\n"
 "  --pinned                   Show only pinned notes\n"
+"  --tag <tag>                Filter notes containing #tag\n"
 "  -f, --folder <f>           Filter by folder\n"
 "  --json                     JSON output (includes created/modified dates)\n"
 "\n"
@@ -307,7 +328,7 @@ int main(int argc, char *argv[]) {
             if (!initNotesContext()) return 1;
 
             if (argc == 2) {
-                cmdNotesList(nil, NO, nil, nil, nil, NO);
+                cmdNotesList(nil, NO, nil, nil, nil, NO, nil);
                 return 0;
             }
 
@@ -329,7 +350,8 @@ int main(int argc, char *argv[]) {
                 NSString *beforeStr = argValue(argc, argv, 3, "--before", NULL);
                 NSString *sortMode = argValue(argc, argv, 3, "--sort", NULL);
                 BOOL pinnedOnly = argHasFlag(argc, argv, 3, "--pinned", NULL);
-                cmdNotesList(folder, jsonOut, afterStr, beforeStr, sortMode, pinnedOnly);
+                NSString *tagFilter = argValue(argc, argv, 3, "--tag", NULL);
+                cmdNotesList(folder, jsonOut, afterStr, beforeStr, sortMode, pinnedOnly, tagFilter);
 
             // ── cider notes show ──
             } else if ([sub isEqualToString:@"show"]) {
@@ -524,6 +546,69 @@ int main(int argc, char *argv[]) {
                 if (!idx) return 1;
                 return cmdNotesUnpin(idx, folder);
 
+            // ── cider notes tag ──
+            } else if ([sub isEqualToString:@"tag"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"tag", folder);
+                if (!idx) return 1;
+                if (argc < 5) {
+                    fprintf(stderr, "Usage: cider notes tag <N> <tag>\n");
+                    return 1;
+                }
+                // Find the tag argument (first non-flag arg after index)
+                NSString *tag = nil;
+                for (int i = 4; i < argc; i++) {
+                    if (strcmp(argv[i], "--folder") == 0 || strcmp(argv[i], "-f") == 0) {
+                        i++; continue;
+                    }
+                    tag = [NSString stringWithUTF8String:argv[i]];
+                    break;
+                }
+                if (!tag) {
+                    fprintf(stderr, "Usage: cider notes tag <N> <tag>\n");
+                    return 1;
+                }
+                return cmdNotesTag(idx, tag, folder);
+
+            // ── cider notes untag ──
+            } else if ([sub isEqualToString:@"untag"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"untag", folder);
+                if (!idx) return 1;
+                if (argc < 5) {
+                    fprintf(stderr, "Usage: cider notes untag <N> <tag>\n");
+                    return 1;
+                }
+                NSString *tag = nil;
+                for (int i = 4; i < argc; i++) {
+                    if (strcmp(argv[i], "--folder") == 0 || strcmp(argv[i], "-f") == 0) {
+                        i++; continue;
+                    }
+                    tag = [NSString stringWithUTF8String:argv[i]];
+                    break;
+                }
+                if (!tag) {
+                    fprintf(stderr, "Usage: cider notes untag <N> <tag>\n");
+                    return 1;
+                }
+                return cmdNotesUntag(idx, tag, folder);
+
+            // ── cider notes tags ──
+            } else if ([sub isEqualToString:@"tags"]) {
+                BOOL withCounts = argHasFlag(argc, argv, 3, "--count", NULL);
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdNotesTags(withCounts, jsonOut);
+
             // ── cider notes replace ──
             } else if ([sub isEqualToString:@"replace"]) {
                 BOOL useRegex = argHasFlag(argc, argv, 3, "--regex", NULL);
@@ -570,11 +655,12 @@ int main(int argc, char *argv[]) {
                 NSString *folder = argValue(argc, argv, 4, "--folder", "-f");
                 NSString *afterStr = argValue(argc, argv, 4, "--after", NULL);
                 NSString *beforeStr = argValue(argc, argv, 4, "--before", NULL);
+                NSString *tagFilter = argValue(argc, argv, 4, "--tag", NULL);
                 if (titleOnly && bodyOnly) {
                     fprintf(stderr, "Error: --title and --body are mutually exclusive\n");
                     return 1;
                 }
-                cmdNotesSearch(query, jsonOut, useRegex, titleOnly, bodyOnly, folder, afterStr, beforeStr);
+                cmdNotesSearch(query, jsonOut, useRegex, titleOnly, bodyOnly, folder, afterStr, beforeStr, tagFilter);
 
             // ── cider notes export ──
             } else if ([sub isEqualToString:@"export"]) {
@@ -689,7 +775,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *folder = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesList(folder, NO, nil, nil, nil, NO);
+                cmdNotesList(folder, NO, nil, nil, nil, NO, nil);
 
             } else if ([sub isEqualToString:@"-v"]) {
                 if (argc < 4) {
@@ -739,7 +825,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesSearch(query, NO, NO, NO, NO, nil, nil, nil);
+                cmdNotesSearch(query, NO, NO, NO, NO, nil, nil, nil, nil);
 
             } else if ([sub isEqualToString:@"--export"]) {
                 if (argc < 4) {

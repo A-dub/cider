@@ -14,7 +14,7 @@ NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
         return 0;
     }
 
-    cmdNotesList(folder, NO, nil, nil, nil, NO);
+    cmdNotesList(folder, NO, nil, nil, nil, NO, nil);
 
     printf("\nEnter note number to %s: ", verb ? [verb UTF8String] : "select");
     fflush(stdout);
@@ -35,8 +35,28 @@ NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
 
 void cmdNotesList(NSString *folder, BOOL jsonOutput,
                   NSString *afterStr, NSString *beforeStr, NSString *sortMode,
-                  BOOL pinnedOnly) {
+                  BOOL pinnedOnly, NSString *tagFilter) {
     NSArray *notes = filteredNotes(folder);
+
+    // Tag filter
+    if (tagFilter) {
+        NSString *normalizedTag = [tagFilter hasPrefix:@"#"]
+            ? [tagFilter lowercaseString]
+            : [[@"#" stringByAppendingString:tagFilter] lowercaseString];
+        NSMutableArray *tagFiltered = [NSMutableArray array];
+        for (id note in notes) {
+            NSString *raw = noteRawText(note);
+            if (!raw) continue;
+            NSArray *tags = extractTags(raw);
+            for (NSString *t in tags) {
+                if ([[t lowercaseString] isEqualToString:normalizedTag]) {
+                    [tagFiltered addObject:note];
+                    break;
+                }
+            }
+        }
+        notes = tagFiltered;
+    }
 
     // Pinned filter
     if (pinnedOnly) {
@@ -867,7 +887,7 @@ void cmdNotesDebug(NSUInteger idx, NSString *folder) {
 
 void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
                     BOOL titleOnly, BOOL bodyOnly, NSString *folder,
-                    NSString *afterStr, NSString *beforeStr) {
+                    NSString *afterStr, NSString *beforeStr, NSString *tagFilter) {
     NSArray *results = nil;
 
     // Date filtering setup
@@ -883,7 +903,15 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
     }
     BOOL hasDateFilter = (afterDate || beforeDate);
 
-    if (!useRegex && !bodyOnly && !folder && !hasDateFilter) {
+    // Normalize tag filter
+    NSString *normalizedTag = nil;
+    if (tagFilter) {
+        normalizedTag = [tagFilter hasPrefix:@"#"]
+            ? [tagFilter lowercaseString]
+            : [[@"#" stringByAppendingString:tagFilter] lowercaseString];
+    }
+
+    if (!useRegex && !bodyOnly && !folder && !hasDateFilter && !tagFilter) {
         // Fast path: Core Data predicate (existing behavior)
         NSPredicate *pred;
         if (titleOnly) {
@@ -924,6 +952,18 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
             BOOL found = NO;
             NSString *title = noteTitle(note);
             NSString *body = noteRawText(note);
+
+            // Tag filter
+            if (normalizedTag) {
+                NSArray *tags = extractTags(body);
+                BOOL hasTag = NO;
+                for (NSString *t in tags) {
+                    if ([[t lowercaseString] isEqualToString:normalizedTag]) {
+                        hasTag = YES; break;
+                    }
+                }
+                if (!hasTag) continue;
+            }
 
             if (!bodyOnly) {
                 // Check title
@@ -1049,6 +1089,144 @@ int cmdNotesUnpin(NSUInteger idx, NSString *folder) {
     printf("📌 Unpinned note %lu: \"%s\"\n", (unsigned long)idx,
            [noteTitle(note) UTF8String]);
     return 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tag helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSArray *extractTags(NSString *text) {
+    if (!text) return @[];
+    NSError *err = nil;
+    NSRegularExpression *re = [NSRegularExpression
+        regularExpressionWithPattern:@"#[A-Za-z][A-Za-z0-9_-]*"
+        options:0 error:&err];
+    if (err) return @[];
+    NSArray *matches = [re matchesInString:text options:0
+                       range:NSMakeRange(0, text.length)];
+    NSMutableOrderedSet *tags = [NSMutableOrderedSet orderedSet];
+    for (NSTextCheckingResult *m in matches) {
+        [tags addObject:[text substringWithRange:m.range]];
+    }
+    return [tags array];
+}
+
+int cmdNotesTag(NSUInteger idx, NSString *tag, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    // Normalize tag
+    NSString *normalized = [tag hasPrefix:@"#"] ? tag : [@"#" stringByAppendingString:tag];
+
+    // Check if tag already exists (case-insensitive)
+    NSString *raw = noteRawText(note);
+    NSArray *existing = extractTags(raw);
+    for (NSString *t in existing) {
+        if ([[t lowercaseString] isEqualToString:[normalized lowercaseString]]) {
+            printf("Note %lu already has tag %s\n", (unsigned long)idx,
+                   [t UTF8String]);
+            return 0;
+        }
+    }
+
+    // Append tag to end of note
+    NSString *newText = [NSString stringWithFormat:@"%@ %@", raw, normalized];
+    if (!applyCRDTEdit(note, raw, newText)) return 1;
+    if (!saveContext()) return 1;
+    printf("Added %s to note %lu\n", [normalized UTF8String], (unsigned long)idx);
+    return 0;
+}
+
+int cmdNotesUntag(NSUInteger idx, NSString *tag, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *normalized = [tag hasPrefix:@"#"] ? tag : [@"#" stringByAppendingString:tag];
+    NSString *raw = noteRawText(note);
+
+    // Build regex to find all occurrences (with optional leading space)
+    NSString *escapedTag = [NSRegularExpression escapedPatternForString:normalized];
+    NSString *pattern = [NSString stringWithFormat:@" ?%@(?=[^A-Za-z0-9_-]|$)", escapedTag];
+    NSError *err = nil;
+    NSRegularExpression *re = [NSRegularExpression
+        regularExpressionWithPattern:pattern
+        options:NSRegularExpressionCaseInsensitive
+        error:&err];
+    if (err) {
+        fprintf(stderr, "Error: Internal regex error\n");
+        return 1;
+    }
+
+    NSString *newText = [re stringByReplacingMatchesInString:raw options:0
+                         range:NSMakeRange(0, raw.length) withTemplate:@""];
+    if ([newText isEqualToString:raw]) {
+        printf("Tag %s not found in note %lu\n", [normalized UTF8String],
+               (unsigned long)idx);
+        return 0;
+    }
+
+    if (!applyCRDTEdit(note, raw, newText)) return 1;
+    if (!saveContext()) return 1;
+    printf("Removed %s from note %lu\n", [normalized UTF8String],
+           (unsigned long)idx);
+    return 0;
+}
+
+void cmdNotesTags(BOOL withCounts, BOOL jsonOutput) {
+    NSArray *notes = fetchAllNotes();
+    NSMutableDictionary *tagCounts = [NSMutableDictionary dictionary];
+
+    for (id note in notes) {
+        NSString *raw = noteRawText(note);
+        if (!raw) continue;
+        NSArray *tags = extractTags(raw);
+        NSMutableSet *seen = [NSMutableSet set]; // unique per note
+        for (NSString *tag in tags) {
+            NSString *lower = [tag lowercaseString];
+            if ([seen containsObject:lower]) continue;
+            [seen addObject:lower];
+            NSNumber *count = tagCounts[lower] ?: @0;
+            tagCounts[lower] = @([count integerValue] + 1);
+        }
+    }
+
+    NSArray *sortedTags = [[tagCounts allKeys]
+        sortedArrayUsingSelector:@selector(compare:)];
+
+    if (jsonOutput) {
+        printf("[\n");
+        for (NSUInteger i = 0; i < sortedTags.count; i++) {
+            NSString *tag = sortedTags[i];
+            NSNumber *count = tagCounts[tag];
+            printf("  {\"tag\":\"%s\",\"count\":%ld}%s\n",
+                   [jsonEscapeString(tag) UTF8String],
+                   (long)[count integerValue],
+                   (i + 1 < sortedTags.count) ? "," : "");
+        }
+        printf("]\n");
+        return;
+    }
+
+    if (sortedTags.count == 0) {
+        printf("No tags found.\n");
+        return;
+    }
+
+    for (NSString *tag in sortedTags) {
+        if (withCounts) {
+            printf("  %-30s %ld note(s)\n", [tag UTF8String],
+                   (long)[tagCounts[tag] integerValue]);
+        } else {
+            printf("  %s\n", [tag UTF8String]);
+        }
+    }
+    printf("\nTotal: %lu unique tag(s)\n", (unsigned long)sortedTags.count);
 }
 
 void cmdNotesExport(NSString *exportPath) {

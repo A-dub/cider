@@ -728,6 +728,61 @@ assert_contains "CiderTest" "search --after today: finds test notes"
 run "$CIDER" notes search "CiderTest" --before "2020-01-01"
 assert_contains "No notes found" "search --before old date: no results"
 
+# ── Test: tags ──────────────────────────────────────────────────────────────
+
+log "Testing: tags"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "tag" "Could not find CiderTest Alpha"
+else
+    # Add a tag
+    run "$CIDER" notes tag "$IDX" "cidertest"
+    assert_rc 0 "tag: exits 0"
+    assert_contains "Added #cidertest" "tag: success message"
+
+    # Verify tag in note body
+    run "$CIDER" notes show "$IDX"
+    assert_contains "#cidertest" "tag: tag appears in note"
+
+    # Duplicate tag detection
+    run "$CIDER" notes tag "$IDX" "#cidertest"
+    assert_contains "already has tag" "tag: duplicate detection"
+
+    # Add another tag with hyphen
+    run "$CIDER" notes tag "$IDX" "test-tag"
+    assert_rc 0 "tag: hyphen tag exits 0"
+
+    # List all tags
+    run "$CIDER" notes tags
+    assert_contains "#cidertest" "tags: lists cidertest tag"
+    assert_contains "#test-tag" "tags: lists hyphen tag"
+
+    # Tags with --count
+    run "$CIDER" notes tags --count
+    assert_contains "note(s)" "tags --count: shows note counts"
+
+    # Tags --json
+    run "$CIDER" notes tags --json
+    assert_contains '"tag"' "tags --json: JSON output"
+
+    # Filter by tag
+    run "$CIDER" notes list --tag cidertest
+    assert_contains "CiderTest Alpha" "list --tag: shows tagged note"
+
+    # Remove tag
+    run "$CIDER" notes untag "$IDX" "cidertest"
+    assert_rc 0 "untag: exits 0"
+    assert_contains "Removed #cidertest" "untag: success message"
+
+    # Remove non-existent tag
+    run "$CIDER" notes untag "$IDX" "nonexistent"
+    assert_contains "not found" "untag: nonexistent tag message"
+
+    # Clean up remaining tag
+    run "$CIDER" notes untag "$IDX" "test-tag"
+fi
+
 # ── Test: pin / unpin ───────────────────────────────────────────────────────
 
 log "Testing: pin / unpin"
