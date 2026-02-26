@@ -940,6 +940,55 @@ run "$CIDER" notes links 99999
 assert_rc 0 "links: nonexistent note shows error"
 assert_contains "not found" "links: error message for nonexistent"
 
+# ── Test: checklists ───────────────────────────────────────────────────
+
+log "Testing: checklists"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "checklist" "Could not find CiderTest Alpha"
+else
+    # Checklist on note with no checklists
+    run "$CIDER" notes checklist "$IDX"
+    assert_rc 0 "checklist: exits 0 on note without checklists"
+    assert_contains "No checklist" "checklist: shows no items message"
+
+    # Checklist --json on empty
+    run "$CIDER" notes checklist "$IDX" --json
+    assert_rc 0 "checklist --json: exits 0 on empty"
+    assert_contains '"items":[]' "checklist --json: empty items array"
+
+    # Checklist --summary on empty
+    run "$CIDER" notes checklist "$IDX" --summary
+    assert_rc 0 "checklist --summary: exits 0 on empty"
+    assert_contains "0/0" "checklist --summary: shows 0/0"
+fi
+
+# Check on nonexistent note
+run "$CIDER" notes check 99999 1
+assert_rc 1 "check: nonexistent note returns exit 1"
+
+# Uncheck on nonexistent note
+run "$CIDER" notes uncheck 99999 1
+assert_rc 1 "uncheck: nonexistent note returns exit 1"
+
+# Check on note with no checklists
+IDX=$(find_note "CiderTest Alpha")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes check "$IDX" 1
+    assert_rc 1 "check: no checklist items returns exit 1"
+
+    run "$CIDER" notes uncheck "$IDX" 1
+    assert_rc 1 "uncheck: no checklist items returns exit 1"
+fi
+
+# Missing item number
+run "$CIDER" notes check 1
+assert_rc 1 "check: missing item number returns exit 1"
+
+run "$CIDER" notes uncheck 1
+assert_rc 1 "uncheck: missing item number returns exit 1"
+
 # ── Test: settings ─────────────────────────────────────────────────────
 
 log "Testing: settings"

@@ -582,7 +582,44 @@ rm -f /tmp/cider_report_watch3_$$.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Folder Management\n\n"
+printf "\n---\n\n## Section 11: Checklists\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Checklist items on test note (no checklists)"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes checklist "$IDX"
+
+
+header "Checklist --json on empty note"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes checklist "$IDX" --json
+
+
+header "Checklist --summary on empty note"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes checklist "$IDX" --summary
+
+
+header "Check on nonexistent note"
+cmd "$CIDER" notes check 99999 1
+
+
+header "Uncheck on nonexistent note"
+cmd "$CIDER" notes uncheck 99999 1
+
+
+header "Check on note without checklists"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes check "$IDX" 1
+
+
+header "Missing item number"
+cmd "$CIDER" notes check 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 12: Folder Management\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -609,7 +646,7 @@ cmd "$CIDER" notes folder delete "NonexistentFolder99"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Tags\n\n"
+printf "\n---\n\n## Section 13: Tags\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -651,7 +688,7 @@ cmd "$CIDER" notes untag "$IDX" "nonexistent"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 13: Pin / Unpin\n\n"
+printf "\n---\n\n## Section 14: Pin / Unpin\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -673,7 +710,7 @@ cmd "$CIDER" notes unpin "$IDX"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 14: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 15: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -702,7 +739,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 15: Attachments\n\n"
+printf "\n---\n\n## Section 16: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -749,7 +786,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 16: Move\n\n"
+printf "\n---\n\n## Section 17: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -775,7 +812,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 17: Delete\n\n"
+printf "\n---\n\n## Section 18: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -793,7 +830,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 18: Export\n\n"
+printf "\n---\n\n## Section 19: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -810,7 +847,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 19: Error Handling\n\n"
+printf "\n---\n\n## Section 20: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -838,7 +875,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 20: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 21: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

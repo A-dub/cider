@@ -2353,3 +2353,309 @@ void cmdNotesWatch(NSString *folder, NSTimeInterval interval, BOOL jsonOutput) {
         snapshot = newSnapshot;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Checklists
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Walk the attributed string and collect checklist items by paragraph.
+// Each item: {text, done (BOOL as NSNumber), index (1-based NSNumber), range (NSValue of NSRange)}
+// We walk by paragraph (newline-delimited) to avoid splitting items across attribute runs.
+static NSArray *collectChecklistItems(id note) {
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) return @[];
+
+    NSAttributedString *attrStr = nil;
+    @try {
+        attrStr = ((id (*)(id, SEL))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"attributedString"));
+    }
+    @catch (NSException *e) { return @[]; }
+    if (!attrStr) return @[];
+
+    NSMutableArray *items = [NSMutableArray array];
+    NSString *fullStr = [attrStr string];
+    NSUInteger len = [fullStr length];
+    int itemNum = 0;
+
+    // Walk paragraph by paragraph
+    NSUInteger paraStart = 0;
+    while (paraStart < len) {
+        NSRange nlRange = [fullStr rangeOfString:@"\n"
+                           options:0 range:NSMakeRange(paraStart, len - paraStart)];
+        NSUInteger paraEnd = (nlRange.location != NSNotFound)
+            ? nlRange.location + 1 : len;
+        NSRange paraRange = NSMakeRange(paraStart, paraEnd - paraStart);
+
+        // Check if this paragraph is a checklist item by examining its first character
+        NSDictionary *attrs = [attrStr attributesAtIndex:paraStart effectiveRange:NULL];
+        id style = attrs[@"TTStyle"];
+        if (style) {
+            NSInteger styleNum = ((NSInteger (*)(id, SEL))objc_msgSend)(
+                style, NSSelectorFromString(@"style"));
+            if (styleNum == 103) {
+                NSString *text = [fullStr substringWithRange:paraRange];
+                if ([text hasSuffix:@"\n"])
+                    text = [text substringToIndex:text.length - 1];
+
+                id todo = ((id (*)(id, SEL))objc_msgSend)(
+                    style, NSSelectorFromString(@"todo"));
+                NSInteger doneRaw = todo
+                    ? ((NSInteger (*)(id, SEL))objc_msgSend)(todo, NSSelectorFromString(@"done"))
+                    : 0;
+                BOOL done = (doneRaw != 0);
+
+                itemNum++;
+                [items addObject:@{
+                    @"text": text,
+                    @"done": @(done),
+                    @"index": @(itemNum),
+                    @"range": [NSValue valueWithRange:paraRange]
+                }];
+            }
+        }
+        paraStart = paraEnd;
+    }
+    return items;
+}
+
+void cmdNotesChecklist(NSUInteger idx, NSString *folder, BOOL jsonOut, BOOL summary,
+                       NSString *addText) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    // Handle --add: append a new checklist item as plain text line
+    if (addText) {
+        NSString *raw = noteRawText(note);
+        NSString *newText;
+        if ([raw hasSuffix:@"\n"]) {
+            newText = [NSString stringWithFormat:@"%@%@\n", raw, addText];
+        } else {
+            newText = [NSString stringWithFormat:@"%@\n%@\n", raw, addText];
+        }
+        if (!applyCRDTEdit(note, raw, newText)) {
+            fprintf(stderr, "Error: Failed to add checklist item\n");
+            return;
+        }
+        if (!saveContext()) return;
+        printf("Added checklist item: \"%s\"\n", [addText UTF8String]);
+        return;
+    }
+
+    NSArray *items = collectChecklistItems(note);
+    NSString *title = noteTitle(note);
+
+    if (items.count == 0) {
+        if (summary) {
+            if (jsonOut) {
+                printf("{\"title\":\"%s\",\"checked\":0,\"total\":0}\n",
+                       [jsonEscapeString(title) UTF8String]);
+            } else {
+                printf("0/0 items complete\n");
+            }
+        } else if (jsonOut) {
+            printf("{\"title\":\"%s\",\"items\":[],\"checked\":0,\"total\":0}\n",
+                   [jsonEscapeString(title) UTF8String]);
+        } else {
+            printf("No checklist items in \"%s\".\n", [title UTF8String]);
+        }
+        return;
+    }
+
+    int checked = 0, total = (int)items.count;
+    for (NSDictionary *item in items) {
+        if ([item[@"done"] boolValue]) checked++;
+    }
+
+    if (summary) {
+        if (jsonOut) {
+            printf("{\"title\":\"%s\",\"checked\":%d,\"total\":%d}\n",
+                   [jsonEscapeString(title) UTF8String], checked, total);
+        } else {
+            printf("%d/%d items complete\n", checked, total);
+        }
+        return;
+    }
+
+    if (jsonOut) {
+        printf("{\"title\":\"%s\",\"items\":[", [jsonEscapeString(title) UTF8String]);
+        for (NSUInteger i = 0; i < items.count; i++) {
+            NSDictionary *item = items[i];
+            printf("%s{\"index\":%d,\"text\":\"%s\",\"done\":%s}",
+                   i > 0 ? "," : "",
+                   [item[@"index"] intValue],
+                   [jsonEscapeString(item[@"text"]) UTF8String],
+                   [item[@"done"] boolValue] ? "true" : "false");
+        }
+        printf("],\"checked\":%d,\"total\":%d}\n", checked, total);
+        return;
+    }
+
+    printf("Checklist items in \"%s\":\n\n", [title UTF8String]);
+    for (NSDictionary *item in items) {
+        BOOL done = [item[@"done"] boolValue];
+        printf("  %d. [%s] %s\n",
+               [item[@"index"] intValue],
+               done ? "x" : " ",
+               [item[@"text"] UTF8String]);
+    }
+    printf("\nSummary: %d/%d complete\n", checked, total);
+}
+
+int cmdNotesCheck(NSUInteger idx, NSUInteger itemNum, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSArray *items = collectChecklistItems(note);
+    if (items.count == 0) {
+        fprintf(stderr, "Error: No checklist items in note %lu\n", (unsigned long)idx);
+        return 1;
+    }
+
+    // Find item by 1-based number
+    NSDictionary *target = nil;
+    for (NSDictionary *item in items) {
+        if ([item[@"index"] unsignedIntegerValue] == itemNum) {
+            target = item;
+            break;
+        }
+    }
+    if (!target) {
+        fprintf(stderr, "Error: Checklist item %lu not found (note has %lu items)\n",
+                (unsigned long)itemNum, (unsigned long)items.count);
+        return 1;
+    }
+
+    if ([target[@"done"] boolValue]) {
+        printf("Item %lu is already checked.\n", (unsigned long)itemNum);
+        return 0;
+    }
+
+    // Toggle the done state via the mergeableString
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return 1;
+    }
+
+    NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"attributedString"));
+    NSRange range = [target[@"range"] rangeValue];
+
+    // Get the current style and create a new todo with done=1
+    NSDictionary *attrs = [attrStr attributesAtIndex:range.location effectiveRange:NULL];
+    id style = attrs[@"TTStyle"];
+    id todo = ((id (*)(id, SEL))objc_msgSend)(style, NSSelectorFromString(@"todo"));
+    NSString *uuid = ((id (*)(id, SEL))objc_msgSend)(todo, NSSelectorFromString(@"uuid"));
+
+    // Create new todo with done=YES
+    Class todoClass = [todo class];
+    id newTodo = ((id (*)(id, SEL, id, NSInteger))objc_msgSend)(
+        [todoClass alloc], NSSelectorFromString(@"initWithIdentifier:done:"),
+        uuid, (NSInteger)1);
+
+    // Create new style with the updated todo
+    Class styleClass = [style class];
+    id newStyle = [[styleClass alloc] init];
+    ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+        newStyle, NSSelectorFromString(@"setStyle:"), (NSInteger)103);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newStyle, NSSelectorFromString(@"setTodo:"), newTodo);
+
+    // Apply the new style attribute
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, id, NSRange))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"addAttribute:value:range:"),
+        @"TTStyle", newStyle, range);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    if (!saveContext()) return 1;
+    printf("Checked item %lu: \"%s\"\n", (unsigned long)itemNum,
+           [target[@"text"] UTF8String]);
+    return 0;
+}
+
+int cmdNotesUncheck(NSUInteger idx, NSUInteger itemNum, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSArray *items = collectChecklistItems(note);
+    if (items.count == 0) {
+        fprintf(stderr, "Error: No checklist items in note %lu\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSDictionary *target = nil;
+    for (NSDictionary *item in items) {
+        if ([item[@"index"] unsignedIntegerValue] == itemNum) {
+            target = item;
+            break;
+        }
+    }
+    if (!target) {
+        fprintf(stderr, "Error: Checklist item %lu not found (note has %lu items)\n",
+                (unsigned long)itemNum, (unsigned long)items.count);
+        return 1;
+    }
+
+    if (![target[@"done"] boolValue]) {
+        printf("Item %lu is already unchecked.\n", (unsigned long)itemNum);
+        return 0;
+    }
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return 1;
+    }
+
+    NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"attributedString"));
+    NSRange range = [target[@"range"] rangeValue];
+
+    NSDictionary *attrs = [attrStr attributesAtIndex:range.location effectiveRange:NULL];
+    id style = attrs[@"TTStyle"];
+    id todo = ((id (*)(id, SEL))objc_msgSend)(style, NSSelectorFromString(@"todo"));
+    NSString *uuid = ((id (*)(id, SEL))objc_msgSend)(todo, NSSelectorFromString(@"uuid"));
+
+    // Create new todo with done=NO
+    Class todoClass = [todo class];
+    id newTodo = ((id (*)(id, SEL, id, NSInteger))objc_msgSend)(
+        [todoClass alloc], NSSelectorFromString(@"initWithIdentifier:done:"),
+        uuid, (NSInteger)0);
+
+    Class styleClass = [style class];
+    id newStyle = [[styleClass alloc] init];
+    ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+        newStyle, NSSelectorFromString(@"setStyle:"), (NSInteger)103);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newStyle, NSSelectorFromString(@"setTodo:"), newTodo);
+
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, id, NSRange))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"addAttribute:value:range:"),
+        @"TTStyle", newStyle, range);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    if (!saveContext()) return 1;
+    printf("Unchecked item %lu: \"%s\"\n", (unsigned long)itemNum,
+           [target[@"text"] UTF8String]);
+    return 0;
+}

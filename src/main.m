@@ -38,6 +38,9 @@ void printHelp(void) {
 "  tag <N> <tag>                       Add #tag to note N\n"
 "  untag <N> <tag>                     Remove #tag from note N\n"
 "  tags [--count] [--json]             List all unique tags\n"
+"  checklist <N> [--summary] [--json] Show checklist items with status\n"
+"  check <N> <item#>                 Check off checklist item\n"
+"  uncheck <N> <item#>               Uncheck checklist item\n"
 "  watch [options]                    Stream note change events\n"
 "  links <N> [--json]                 Show outgoing note links\n"
 "  backlinks <N> [--json]             Show notes linking to note N\n"
@@ -171,6 +174,26 @@ void printNotesHelp(void) {
 "    cider templates show \"Meeting Notes\"  View template content\n"
 "    cider notes add --template \"Meeting Notes\"  Create note from template\n"
 "    cider notes add --template \"TODO\" -f Work   Template + target folder\n"
+"\n"
+"CHECKLISTS:\n"
+"  cider notes checklist <N>                 Show checklist items with status\n"
+"  cider notes checklist <N> --summary       Summary only (e.g. \"3/6 complete\")\n"
+"  cider notes checklist <N> --json          JSON output\n"
+"  cider notes checklist <N> --add \"text\"    Add a new checklist item\n"
+"  cider notes check <N> <item#>             Check off item by number\n"
+"  cider notes uncheck <N> <item#>           Uncheck item by number\n"
+"\n"
+"  Reads native Apple Notes checklist formatting (style 103 paragraphs).\n"
+"  Items are numbered sequentially (1-based). Check/uncheck toggles\n"
+"  the done state via the CRDT attributed string.\n"
+"\n"
+"  Examples:\n"
+"    cider notes checklist 5                Show all items with [x]/[ ] status\n"
+"    cider notes checklist 5 --summary      \"3/6 items complete\"\n"
+"    cider notes check 5 2                  Check off item 2\n"
+"    cider notes uncheck 5 2                Uncheck item 2\n"
+"    cider notes checklist 5 --add \"Buy milk\"  Add new item\n"
+"    cider notes checklist 5 --json         JSON with items array\n"
 "\n"
 "WATCH / EVENTS:\n"
 "  cider notes watch                          Stream note change events\n"
@@ -683,6 +706,63 @@ int main(int argc, char *argv[]) {
                     if (!idx) return 1;
                     cmdNotesBacklinks(idx, folder, jsonOut);
                 }
+
+            // ── cider notes checklist ──
+            } else if ([sub isEqualToString:@"checklist"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"show checklist for", folder);
+                if (!idx) return 1;
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                BOOL summary = argHasFlag(argc, argv, 3, "--summary", NULL);
+                NSString *addText = argValue(argc, argv, 3, "--add", NULL);
+                cmdNotesChecklist(idx, folder, jsonOut, summary, addText);
+
+            // ── cider notes check ──
+            } else if ([sub isEqualToString:@"check"]) {
+                NSUInteger idx = 0;
+                NSUInteger itemNum = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (argc >= 5) {
+                    int v = atoi(argv[4]);
+                    if (v > 0) itemNum = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"check item in", folder);
+                if (!idx) return 1;
+                if (!itemNum) {
+                    fprintf(stderr, "Usage: cider notes check <N> <item#>\n");
+                    return 1;
+                }
+                return cmdNotesCheck(idx, itemNum, folder);
+
+            // ── cider notes uncheck ──
+            } else if ([sub isEqualToString:@"uncheck"]) {
+                NSUInteger idx = 0;
+                NSUInteger itemNum = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                if (argc >= 5) {
+                    int v = atoi(argv[4]);
+                    if (v > 0) itemNum = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"uncheck item in", folder);
+                if (!idx) return 1;
+                if (!itemNum) {
+                    fprintf(stderr, "Usage: cider notes uncheck <N> <item#>\n");
+                    return 1;
+                }
+                return cmdNotesUncheck(idx, itemNum, folder);
 
             // ── cider notes folder ──
             } else if ([sub isEqualToString:@"folder"]) {
