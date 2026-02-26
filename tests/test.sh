@@ -678,6 +678,56 @@ else
     fi
 fi
 
+# ── Test: date filtering + sorting ──────────────────────────────────────────
+
+log "Testing: date filtering + sorting"
+
+# --after today should include test notes (they were just created)
+run "$CIDER" notes list --after today
+assert_rc 0 "list --after today: exits 0"
+assert_contains "CiderTest Alpha" "list --after today: includes recently modified notes"
+
+# --before with old date should exclude test notes
+run "$CIDER" notes list --before "2020-01-01"
+if echo "$OUT" | grep -qF "CiderTest Alpha"; then
+    fail "list --before old date" "test note should not appear before 2020"
+else
+    pass "list --before old date: excludes recent notes"
+fi
+
+# --sort modified
+run "$CIDER" notes list --sort modified
+assert_rc 0 "list --sort modified: exits 0"
+assert_contains "Total:" "list --sort modified: shows total"
+
+# --sort created
+run "$CIDER" notes list --sort created
+assert_rc 0 "list --sort created: exits 0"
+assert_contains "Total:" "list --sort created: shows total"
+
+# --after + --folder combined
+run "$CIDER" notes list --after today -f "$TEST_FOLDER"
+assert_rc 0 "list --after + --folder: exits 0"
+assert_contains "CiderTest Alpha" "list --after + --folder: includes test notes"
+
+# JSON includes created/modified dates
+run "$CIDER" notes list --json -f "$TEST_FOLDER"
+assert_contains "created" "list --json: includes created date"
+assert_contains "modified" "list --json: includes modified date"
+
+# Invalid date error
+run "$CIDER" notes list --after "not-a-date"
+assert_contains "Invalid date" "list --after invalid: shows error"
+
+# Search with --after
+run "$CIDER" notes search "CiderTest" --after today
+assert_rc 0 "search --after today: exits 0"
+assert_contains "CiderTest" "search --after today: finds test notes"
+
+# Search with --before old date
+run "$CIDER" notes search "CiderTest" --before "2020-01-01"
+assert_contains "No notes found" "search --before old date: no results"
+
 # ── Test: error handling ─────────────────────────────────────────────────────
 
 log "Testing: error handling"

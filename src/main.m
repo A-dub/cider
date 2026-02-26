@@ -23,7 +23,8 @@ void printHelp(void) {
 "  cider --help               Show this help\n"
 "\n"
 "NOTES SUBCOMMANDS:\n"
-"  list [-f <folder>] [--json]         List notes (default when no subcommand)\n"
+"  list [-f <folder>] [--json] [--after <date>] [--before <date>] [--sort <mode>]\n"
+"                                       List notes (default when no subcommand)\n"
 "  show <N> [--json]                   View note N  (also: cider notes <N>)\n"
 "  folders [--json]                    List all folders\n"
 "  add [--folder <f>]                  Add note (stdin or $EDITOR)\n"
@@ -92,7 +93,7 @@ void printNotesHelp(void) {
 "\n"
 "USAGE:\n"
 "  cider notes                              List all notes\n"
-"  cider notes list [-f <folder>] [--json]  List notes (optionally filter by folder)\n"
+"  cider notes list [options]               List notes (filter, sort, date range)\n"
 "  cider notes <N>                          View note N\n"
 "  cider notes show <N> [--json]            View note N\n"
 "  cider notes folders [--json]             List all folders\n"
@@ -130,6 +131,27 @@ void printNotesHelp(void) {
 "  Useful for discovering how Apple Notes stores checklists, tables,\n"
 "  links, and other rich formatting internally.\n"
 "\n"
+"LIST (date filtering & sorting):\n"
+"  cider notes list [options]\n"
+"\n"
+"  --after <date>              Notes modified after date\n"
+"  --before <date>             Notes modified before date\n"
+"  --sort created|modified|title  Sort order (default: title)\n"
+"  -f, --folder <f>           Filter by folder\n"
+"  --json                     JSON output (includes created/modified dates)\n"
+"\n"
+"  Date formats:\n"
+"    ISO 8601:   2024-01-15, 2024-01-15T10:30:00\n"
+"    Relative:   today, yesterday, \"3 days ago\", \"1 week ago\", \"2 months ago\"\n"
+"\n"
+"  Examples:\n"
+"    cider notes list --after today\n"
+"    cider notes list --before 2024-06-01\n"
+"    cider notes list --after yesterday --sort modified\n"
+"    cider notes list --sort created --json\n"
+"    cider notes list --after \"1 week ago\" -f Work\n"
+"    cider notes search \"meeting\" --after today\n"
+"\n"
 "SEARCH:\n"
 "  cider notes search <query> [options]\n"
 "\n"
@@ -139,6 +161,8 @@ void printNotesHelp(void) {
 "  --title          Search title only (mutually exclusive with --body)\n"
 "  --body           Search body only (mutually exclusive with --title)\n"
 "  -f, --folder <f> Scope search to a specific folder\n"
+"  --after <date>   Only notes modified after date\n"
+"  --before <date>  Only notes modified before date\n"
 "  --json           Output results as JSON\n"
 "\n"
 "  Examples:\n"
@@ -146,6 +170,7 @@ void printNotesHelp(void) {
 "    cider notes search \"\\\\d{3}-\\\\d{4}\" --regex     Find phone numbers\n"
 "    cider notes search \"TODO\" --title              Search titles only\n"
 "    cider notes search \"important\" --body -f Work  Search body in Work folder\n"
+"    cider notes search \"meeting\" --after today     Search with date filter\n"
 "\n"
 "REPLACE (single note):\n"
 "  cider notes replace <N> --find <s> --replace <s> [options]\n"
@@ -266,7 +291,7 @@ int main(int argc, char *argv[]) {
             if (!initNotesContext()) return 1;
 
             if (argc == 2) {
-                cmdNotesList(nil, NO);
+                cmdNotesList(nil, NO, nil, nil, nil);
                 return 0;
             }
 
@@ -284,7 +309,10 @@ int main(int argc, char *argv[]) {
             if ([sub isEqualToString:@"list"]) {
                 NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
-                cmdNotesList(folder, jsonOut);
+                NSString *afterStr = argValue(argc, argv, 3, "--after", NULL);
+                NSString *beforeStr = argValue(argc, argv, 3, "--before", NULL);
+                NSString *sortMode = argValue(argc, argv, 3, "--sort", NULL);
+                cmdNotesList(folder, jsonOut, afterStr, beforeStr, sortMode);
 
             // ── cider notes show ──
             } else if ([sub isEqualToString:@"show"]) {
@@ -499,11 +527,13 @@ int main(int argc, char *argv[]) {
                 BOOL titleOnly = argHasFlag(argc, argv, 4, "--title", NULL);
                 BOOL bodyOnly = argHasFlag(argc, argv, 4, "--body", NULL);
                 NSString *folder = argValue(argc, argv, 4, "--folder", "-f");
+                NSString *afterStr = argValue(argc, argv, 4, "--after", NULL);
+                NSString *beforeStr = argValue(argc, argv, 4, "--before", NULL);
                 if (titleOnly && bodyOnly) {
                     fprintf(stderr, "Error: --title and --body are mutually exclusive\n");
                     return 1;
                 }
-                cmdNotesSearch(query, jsonOut, useRegex, titleOnly, bodyOnly, folder);
+                cmdNotesSearch(query, jsonOut, useRegex, titleOnly, bodyOnly, folder, afterStr, beforeStr);
 
             // ── cider notes export ──
             } else if ([sub isEqualToString:@"export"]) {
@@ -618,7 +648,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *folder = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesList(folder, NO);
+                cmdNotesList(folder, NO, nil, nil, nil);
 
             } else if ([sub isEqualToString:@"-v"]) {
                 if (argc < 4) {
@@ -668,7 +698,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *query = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesSearch(query, NO, NO, NO, NO, nil);
+                cmdNotesSearch(query, NO, NO, NO, NO, nil, nil, nil);
 
             } else if ([sub isEqualToString:@"--export"]) {
                 if (argc < 4) {

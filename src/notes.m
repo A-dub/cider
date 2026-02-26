@@ -14,7 +14,7 @@ NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
         return 0;
     }
 
-    cmdNotesList(folder, NO);
+    cmdNotesList(folder, NO, nil, nil, nil);
 
     printf("\nEnter note number to %s: ", verb ? [verb UTF8String] : "select");
     fflush(stdout);
@@ -33,8 +33,58 @@ NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
 // COMMANDS: notes
 // ─────────────────────────────────────────────────────────────────────────────
 
-void cmdNotesList(NSString *folder, BOOL jsonOutput) {
+void cmdNotesList(NSString *folder, BOOL jsonOutput,
+                  NSString *afterStr, NSString *beforeStr, NSString *sortMode) {
     NSArray *notes = filteredNotes(folder);
+
+    // Date filtering
+    NSDate *afterDate = afterStr ? parseDateString(afterStr) : nil;
+    NSDate *beforeDate = beforeStr ? parseDateString(beforeStr) : nil;
+
+    if (afterStr && !afterDate) {
+        fprintf(stderr, "Error: Invalid date '%s'. Use ISO 8601 (2024-01-15) or relative (today, yesterday, \"3 days ago\").\n",
+                [afterStr UTF8String]);
+        return;
+    }
+    if (beforeStr && !beforeDate) {
+        fprintf(stderr, "Error: Invalid date '%s'. Use ISO 8601 (2024-01-15) or relative (today, yesterday, \"3 days ago\").\n",
+                [beforeStr UTF8String]);
+        return;
+    }
+
+    if (afterDate || beforeDate) {
+        NSMutableArray *filtered = [NSMutableArray array];
+        for (id note in notes) {
+            NSDate *mod = [note valueForKey:@"modificationDate"];
+            if (!mod) continue;
+            if (afterDate && [mod compare:afterDate] == NSOrderedAscending) continue;
+            if (beforeDate && [mod compare:beforeDate] == NSOrderedDescending) continue;
+            [filtered addObject:note];
+        }
+        notes = filtered;
+    }
+
+    // Sorting
+    if (sortMode) {
+        if ([sortMode isEqualToString:@"modified"]) {
+            notes = [notes sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+                NSDate *da = [a valueForKey:@"modificationDate"];
+                NSDate *db = [b valueForKey:@"modificationDate"];
+                if (!da) return NSOrderedAscending;
+                if (!db) return NSOrderedDescending;
+                return [db compare:da]; // newest first
+            }];
+        } else if ([sortMode isEqualToString:@"created"]) {
+            notes = [notes sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+                NSDate *da = [a valueForKey:@"creationDate"];
+                NSDate *db = [b valueForKey:@"creationDate"];
+                if (!da) return NSOrderedAscending;
+                if (!db) return NSOrderedDescending;
+                return [db compare:da]; // newest first
+            }];
+        }
+        // "title" sort is the default from filteredNotes(), so no-op
+    }
 
     if (jsonOutput) {
         printf("[\n");
@@ -43,11 +93,16 @@ void cmdNotesList(NSString *folder, BOOL jsonOutput) {
             NSString *t = jsonEscapeString(noteTitle(note));
             NSString *f = jsonEscapeString(folderName(note));
             NSUInteger ac = noteAttachmentCount(note);
-            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\",\"attachments\":%lu}%s\n",
+            NSDate *created = [note valueForKey:@"creationDate"];
+            NSDate *modified = [note valueForKey:@"modificationDate"];
+            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\","
+                   "\"attachments\":%lu,\"created\":\"%s\",\"modified\":\"%s\"}%s\n",
                    (unsigned long)(i + 1),
                    [t UTF8String],
                    [f UTF8String],
                    (unsigned long)ac,
+                   [isoDateString(created) UTF8String],
+                   [isoDateString(modified) UTF8String],
                    (i + 1 < notes.count) ? "," : "");
         }
         printf("]\n");
@@ -799,10 +854,24 @@ void cmdNotesDebug(NSUInteger idx, NSString *folder) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
-                    BOOL titleOnly, BOOL bodyOnly, NSString *folder) {
+                    BOOL titleOnly, BOOL bodyOnly, NSString *folder,
+                    NSString *afterStr, NSString *beforeStr) {
     NSArray *results = nil;
 
-    if (!useRegex && !bodyOnly && !folder) {
+    // Date filtering setup
+    NSDate *afterDate = afterStr ? parseDateString(afterStr) : nil;
+    NSDate *beforeDate = beforeStr ? parseDateString(beforeStr) : nil;
+    if (afterStr && !afterDate) {
+        fprintf(stderr, "Error: Invalid date '%s'.\n", [afterStr UTF8String]);
+        return;
+    }
+    if (beforeStr && !beforeDate) {
+        fprintf(stderr, "Error: Invalid date '%s'.\n", [beforeStr UTF8String]);
+        return;
+    }
+    BOOL hasDateFilter = (afterDate || beforeDate);
+
+    if (!useRegex && !bodyOnly && !folder && !hasDateFilter) {
         // Fast path: Core Data predicate (existing behavior)
         NSPredicate *pred;
         if (titleOnly) {
@@ -814,7 +883,7 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
         }
         results = fetchNotes(pred);
     } else {
-        // Client-side filtering: regex, body-only, or folder-scoped
+        // Client-side filtering: regex, body-only, folder-scoped, or date-filtered
         NSArray *candidates = filteredNotes(folder);
         NSRegularExpression *regex = nil;
         if (useRegex) {
@@ -832,6 +901,14 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
 
         NSMutableArray *matched = [NSMutableArray array];
         for (id note in candidates) {
+            // Date filter
+            if (hasDateFilter) {
+                NSDate *mod = [note valueForKey:@"modificationDate"];
+                if (!mod) continue;
+                if (afterDate && [mod compare:afterDate] == NSOrderedAscending) continue;
+                if (beforeDate && [mod compare:beforeDate] == NSOrderedDescending) continue;
+            }
+
             BOOL found = NO;
             NSString *title = noteTitle(note);
             NSString *body = noteRawText(note);
@@ -881,11 +958,16 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
             NSString *t = jsonEscapeString(noteTitle(note));
             NSString *f = jsonEscapeString(folderName(note));
             NSUInteger ac = noteAttachmentCount(note);
-            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\",\"attachments\":%lu}%s\n",
+            NSDate *created = [note valueForKey:@"creationDate"];
+            NSDate *modified = [note valueForKey:@"modificationDate"];
+            printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\","
+                   "\"attachments\":%lu,\"created\":\"%s\",\"modified\":\"%s\"}%s\n",
                    (unsigned long)(i + 1),
                    [t UTF8String],
                    [f UTF8String],
                    (unsigned long)ac,
+                   [isoDateString(created) UTF8String],
+                   [isoDateString(modified) UTF8String],
                    (i + 1 < results.count) ? "," : "");
         }
         printf("]\n");

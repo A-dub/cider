@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.4.0"
+#define VERSION "3.5.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,13 +86,16 @@ NSString *jsonEscapeString(NSString *s);
 NSString *truncStr(NSString *s, NSUInteger maxLen);
 NSString *padRight(NSString *s, NSUInteger width);
 NSAppleEventDescriptor *runAppleScript(NSString *src, NSString **errMsg);
+NSString *isoDateString(NSDate *date);
+NSDate *parseDateString(NSString *str);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Notes commands (notes.m)
 // ─────────────────────────────────────────────────────────────────────────────
 
 NSUInteger promptNoteIndex(NSString *verb, NSString *folder);
-void cmdNotesList(NSString *folder, BOOL jsonOutput);
+void cmdNotesList(NSString *folder, BOOL jsonOutput,
+                  NSString *afterStr, NSString *beforeStr, NSString *sortMode);
 void cmdFoldersList(BOOL jsonOutput);
 int  cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput);
 void cmdNotesAdd(NSString *folderName);
@@ -104,7 +107,8 @@ int  cmdNotesReplaceAll(NSString *findStr, NSString *replaceStr, NSString *folde
 void cmdNotesDelete(NSUInteger idx);
 void cmdNotesMove(NSUInteger idx, NSString *targetFolderName);
 void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
-                    BOOL titleOnly, BOOL bodyOnly, NSString *folder);
+                    BOOL titleOnly, BOOL bodyOnly, NSString *folder,
+                    NSString *afterStr, NSString *beforeStr);
 int  cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 int  cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 void cmdNotesDebug(NSUInteger idx, NSString *folder);

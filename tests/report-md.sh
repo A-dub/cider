@@ -413,7 +413,37 @@ cmd "$CIDER" notes debug "$IDX"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 6: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 6: Date Filtering & Sorting\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "List notes modified after today"
+cmd "$CIDER" notes list --after today -f "$TEST_FOLDER"
+
+header "List notes modified before 2020-01-01"
+cmd "$CIDER" notes list --before "2020-01-01" -f "$TEST_FOLDER"
+
+header "List notes sorted by modification date"
+cmd "$CIDER" notes list --sort modified -f "$TEST_FOLDER"
+
+header "List notes sorted by creation date"
+cmd "$CIDER" notes list --sort created -f "$TEST_FOLDER"
+
+header "JSON output with created/modified dates"
+cmd "$CIDER" notes list --json -f "$TEST_FOLDER"
+
+header "Date filtering with --after and --folder combined"
+cmd "$CIDER" notes list --after "1 week ago" -f "$TEST_FOLDER"
+
+header "Search with --after date filter"
+cmd "$CIDER" notes search "CiderTest" --after today
+
+header "Invalid date shows error"
+cmd "$CIDER" notes list --after "not-a-date"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 7: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -442,7 +472,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 7: Attachments\n\n"
+printf "\n---\n\n## Section 8: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -489,7 +519,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 8: Move\n\n"
+printf "\n---\n\n## Section 9: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -515,7 +545,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Delete\n\n"
+printf "\n---\n\n## Section 10: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -533,7 +563,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Export\n\n"
+printf "\n---\n\n## Section 11: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -550,7 +580,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Error Handling\n\n"
+printf "\n---\n\n## Section 12: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -578,7 +608,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 13: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

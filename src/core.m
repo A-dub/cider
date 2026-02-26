@@ -447,6 +447,69 @@ NSString *jsonEscapeString(NSString *s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Date helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+NSString *isoDateString(NSDate *date) {
+    if (!date) return @"";
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+    fmt.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+    return [fmt stringFromDate:date];
+}
+
+NSDate *parseDateString(NSString *str) {
+    if (!str) return nil;
+    NSString *lower = [str lowercaseString];
+
+    // Relative dates
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSDate *now = [NSDate date];
+
+    if ([lower isEqualToString:@"today"]) {
+        return [cal startOfDayForDate:now];
+    }
+    if ([lower isEqualToString:@"yesterday"]) {
+        NSDate *yesterday = [cal dateByAddingUnit:NSCalendarUnitDay value:-1
+                                           toDate:now options:0];
+        return [cal startOfDayForDate:yesterday];
+    }
+
+    // "N days/weeks/months ago"
+    NSRegularExpression *relRe = [NSRegularExpression
+        regularExpressionWithPattern:@"^(\\d+)\\s+(day|week|month|year)s?\\s+ago$"
+        options:NSRegularExpressionCaseInsensitive error:nil];
+    NSTextCheckingResult *m = [relRe firstMatchInString:lower options:0
+                                range:NSMakeRange(0, lower.length)];
+    if (m) {
+        NSInteger n = [[lower substringWithRange:[m rangeAtIndex:1]] integerValue];
+        NSString *unit = [lower substringWithRange:[m rangeAtIndex:2]];
+        NSCalendarUnit calUnit = NSCalendarUnitDay;
+        if ([unit isEqualToString:@"week"])  { calUnit = NSCalendarUnitDay; n *= 7; }
+        else if ([unit isEqualToString:@"month"]) calUnit = NSCalendarUnitMonth;
+        else if ([unit isEqualToString:@"year"])  calUnit = NSCalendarUnitYear;
+        NSDate *d = [cal dateByAddingUnit:calUnit value:-n toDate:now options:0];
+        return [cal startOfDayForDate:d];
+    }
+
+    // ISO 8601 with time
+    NSDateFormatter *isoFull = [[NSDateFormatter alloc] init];
+    isoFull.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss";
+    isoFull.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    NSDate *d = [isoFull dateFromString:str];
+    if (d) return d;
+
+    // ISO 8601 date only
+    NSDateFormatter *isoDate = [[NSDateFormatter alloc] init];
+    isoDate.dateFormat = @"yyyy-MM-dd";
+    isoDate.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    d = [isoDate dateFromString:str];
+    if (d) return d;
+
+    return nil;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AppleScript helper
 // ─────────────────────────────────────────────────────────────────────────────
 

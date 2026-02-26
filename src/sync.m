@@ -74,13 +74,7 @@ static NSString *sanitizeFilename(NSString *name, NSInteger pk) {
     return safe;
 }
 
-static NSString *isoDateString(NSDate *date) {
-    if (!date) return @"";
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
-    fmt.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
-    return [fmt stringFromDate:date];
-}
+// isoDateString() moved to core.m (now extern)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backup
