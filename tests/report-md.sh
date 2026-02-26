@@ -347,7 +347,73 @@ cmd "$CIDER" notes replace --all --find "xyzNonexistent99" --replace "x" --folde
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 5: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 5: Append / Prepend\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Append text to note"
+IDX=$(find_note "CiderTest Alpha")
+section "BEFORE"
+show_note "CiderTest Alpha"
+section "COMMAND"
+cmd "$CIDER" notes append "$IDX" "This line was appended."
+section "AFTER"
+show_note "CiderTest Alpha"
+
+
+header "Append via stdin pipe"
+IDX=$(find_note "CiderTest Beta")
+section "BEFORE"
+show_note "CiderTest Beta"
+section "COMMAND"
+printf '```\n$ echo "Piped content here." | cider notes append %s\n' "$IDX"
+echo "Piped content here." | "$CIDER" notes append "$IDX" 2>&1
+printf '```\n'
+section "AFTER"
+show_note "CiderTest Beta"
+
+
+header "Append \`--no-newline\`"
+IDX=$(find_note "CiderTest Alpha")
+section "BEFORE"
+show_note "CiderTest Alpha"
+section "COMMAND"
+printf 'Appends without a newline separator — text is concatenated directly.\n\n'
+cmd "$CIDER" notes append "$IDX" " (suffix)" --no-newline
+section "AFTER"
+show_note "CiderTest Alpha"
+
+
+header "Prepend text after title"
+IDX=$(find_note "CiderTest Gamma")
+section "BEFORE"
+show_note "CiderTest Gamma"
+section "COMMAND"
+cmd "$CIDER" notes prepend "$IDX" "Prepended after the title line."
+section "AFTER"
+show_note "CiderTest Gamma"
+
+
+header "Prepend via stdin pipe"
+IDX=$(find_note "CiderTest Gamma")
+section "BEFORE"
+show_note "CiderTest Gamma"
+section "COMMAND"
+printf '```\n$ echo "Piped prepend." | cider notes prepend %s\n' "$IDX"
+echo "Piped prepend." | "$CIDER" notes prepend "$IDX" 2>&1
+printf '```\n'
+section "AFTER"
+show_note "CiderTest Gamma"
+
+
+header "Debug — dump attributed string attributes"
+IDX=$(find_note "CiderTest Alpha")
+printf 'Shows all NSAttributedString attribute keys and values stored in the note'\''s CRDT.\n\n'
+cmd "$CIDER" notes debug "$IDX"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 6: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -376,7 +442,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 6: Attachments\n\n"
+printf "\n---\n\n## Section 7: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -423,7 +489,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 7: Move\n\n"
+printf "\n---\n\n## Section 8: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -449,7 +515,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 8: Delete\n\n"
+printf "\n---\n\n## Section 9: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -467,7 +533,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Export\n\n"
+printf "\n---\n\n## Section 10: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -484,7 +550,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Error Handling\n\n"
+printf "\n---\n\n## Section 11: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -512,7 +578,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 12: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 

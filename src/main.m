@@ -34,6 +34,10 @@ void printHelp(void) {
 "                                       Find & replace in note N (full content)\n"
 "  replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]\n"
 "                                       Find & replace across multiple notes\n"
+"  append <N> <text> [--no-newline] [-f <folder>]\n"
+"                                       Append text to end of note N\n"
+"  prepend <N> <text> [--no-newline] [-f <folder>]\n"
+"                                       Insert text after title of note N\n"
 "  search <query> [--json] [--regex] [--title] [--body] [-f <folder>]\n"
 "                                       Search notes (title + body by default)\n"
 "  export <path>                       Export all notes to HTML\n"
@@ -101,6 +105,30 @@ void printNotesHelp(void) {
 "  cider notes attachments <N> [--json]     List attachments with positions\n"
 "  cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)\n"
 "  cider notes detach <N> [<A>]             Remove attachment A from note N\n"
+"\n"
+"APPEND / PREPEND:\n"
+"  cider notes append <N> <text> [options]\n"
+"  cider notes prepend <N> <text> [options]\n"
+"\n"
+"  Append adds text to the end of the note. Prepend inserts text right\n"
+"  after the title line. Both support stdin piping.\n"
+"\n"
+"  --no-newline     Don't add newline separator\n"
+"  -f, --folder <f> Scope note index to folder\n"
+"\n"
+"  Examples:\n"
+"    cider notes append 3 \"Added at the bottom\"\n"
+"    cider notes prepend 3 \"Inserted after title\"\n"
+"    echo \"piped text\" | cider notes append 3\n"
+"    cider notes append 3 \"no gap\" --no-newline\n"
+"    cider notes prepend 3 \"text\" -f \"Work Notes\"\n"
+"\n"
+"DEBUG:\n"
+"  cider notes debug <N> [-f <folder>]\n"
+"\n"
+"  Dumps all attributed string attribute keys and values for a note.\n"
+"  Useful for discovering how Apple Notes stores checklists, tables,\n"
+"  links, and other rich formatting internally.\n"
 "\n"
 "SEARCH:\n"
 "  cider notes search <query> [options]\n"
@@ -324,6 +352,108 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 cmdNotesMove(idx, targetFolder);
+
+            // ── cider notes append ──
+            } else if ([sub isEqualToString:@"append"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                BOOL noNewline = argHasFlag(argc, argv, 3, "--no-newline", NULL);
+                if (!idx) idx = promptNoteIndex(@"append to", folder);
+                if (!idx) return 1;
+
+                // Collect non-flag arguments after index as text (priority over stdin)
+                NSString *text = nil;
+                NSMutableArray *parts = [NSMutableArray array];
+                for (int i = 4; i < argc; i++) {
+                    if (strcmp(argv[i], "--no-newline") == 0 ||
+                        strcmp(argv[i], "--folder") == 0 ||
+                        strcmp(argv[i], "-f") == 0) {
+                        if (strcmp(argv[i], "--folder") == 0 ||
+                            strcmp(argv[i], "-f") == 0) i++; // skip value
+                        continue;
+                    }
+                    [parts addObject:[NSString stringWithUTF8String:argv[i]]];
+                }
+                if (parts.count > 0) {
+                    text = [parts componentsJoinedByString:@" "];
+                }
+
+                // Fall back to stdin if no argument text
+                if (!text && !isatty(STDIN_FILENO)) {
+                    NSFileHandle *fh = [NSFileHandle fileHandleWithStandardInput];
+                    NSData *data = [fh readDataToEndOfFile];
+                    text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                    if ([text hasSuffix:@"\n"]) {
+                        text = [text substringToIndex:[text length] - 1];
+                    }
+                }
+
+                if (!text || [text length] == 0) {
+                    fprintf(stderr, "Error: No text provided. Pass text as argument or pipe from stdin.\n");
+                    return 1;
+                }
+                return cmdNotesAppend(idx, text, folder, noNewline);
+
+            // ── cider notes prepend ──
+            } else if ([sub isEqualToString:@"prepend"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                BOOL noNewline = argHasFlag(argc, argv, 3, "--no-newline", NULL);
+                if (!idx) idx = promptNoteIndex(@"prepend to", folder);
+                if (!idx) return 1;
+
+                // Collect non-flag arguments after index as text (priority over stdin)
+                NSString *text = nil;
+                NSMutableArray *parts = [NSMutableArray array];
+                for (int i = 4; i < argc; i++) {
+                    if (strcmp(argv[i], "--no-newline") == 0 ||
+                        strcmp(argv[i], "--folder") == 0 ||
+                        strcmp(argv[i], "-f") == 0) {
+                        if (strcmp(argv[i], "--folder") == 0 ||
+                            strcmp(argv[i], "-f") == 0) i++;
+                        continue;
+                    }
+                    [parts addObject:[NSString stringWithUTF8String:argv[i]]];
+                }
+                if (parts.count > 0) {
+                    text = [parts componentsJoinedByString:@" "];
+                }
+
+                // Fall back to stdin if no argument text
+                if (!text && !isatty(STDIN_FILENO)) {
+                    NSFileHandle *fh = [NSFileHandle fileHandleWithStandardInput];
+                    NSData *data = [fh readDataToEndOfFile];
+                    text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                    if ([text hasSuffix:@"\n"]) {
+                        text = [text substringToIndex:[text length] - 1];
+                    }
+                }
+
+                if (!text || [text length] == 0) {
+                    fprintf(stderr, "Error: No text provided. Pass text as argument or pipe from stdin.\n");
+                    return 1;
+                }
+                return cmdNotesPrepend(idx, text, folder, noNewline);
+
+            // ── cider notes debug ──
+            } else if ([sub isEqualToString:@"debug"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"debug", folder);
+                if (!idx) return 1;
+                cmdNotesDebug(idx, folder);
 
             // ── cider notes replace ──
             } else if ([sub isEqualToString:@"replace"]) {

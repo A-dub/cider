@@ -116,7 +116,8 @@ cleanup() {
     for title in "CiderTest Alpha" "CiderTest Beta" "CiderTest Gamma" \
                  "CiderTest Delta" "CiderTest Attach" "CiderTest Piped" \
                  "Piped note content here" \
-                 "CiderTest Regex" "CiderTest ReplAll1" "CiderTest ReplAll2"; do
+                 "CiderTest Regex" "CiderTest ReplAll1" "CiderTest ReplAll2" \
+                 "CiderTest Append" "CiderTest Prepend"; do
         delete_note_as "$title"
     done
 }
@@ -197,6 +198,8 @@ create_note "CiderTest Attach" "Attachment test. BEFORE_ATTACH and AFTER_ATTACH 
 create_note "CiderTest Regex" "Contact: alice@example.com and bob@test.org. Phone: 555-1234."
 create_note "CiderTest ReplAll1" "The quick brown fox jumps."
 create_note "CiderTest ReplAll2" "The quick brown dog runs."
+create_note "CiderTest Append" "Original append body."
+create_note "CiderTest Prepend" "Original prepend body."
 
 sleep 1  # Brief pause for any background indexing
 
@@ -467,6 +470,78 @@ if [ -n "$IDX" ]; then
 
     run "$CIDER" notes replace "$IDX" --find "[invalid" --replace "x" --regex
     assert_rc 1 "replace --regex: invalid regex returns error"
+fi
+
+# ── Test: notes append ───────────────────────────────────────────────────────
+
+log "Testing: notes append"
+
+IDX=$(find_note "CiderTest Append")
+if [ -z "$IDX" ]; then
+    fail "append" "Could not find CiderTest Append"
+else
+    # Basic append
+    run "$CIDER" notes append "$IDX" "Appended line one."
+    assert_rc 0 "append: exits 0"
+    assert_contains "✓" "append: success message"
+
+    run "$CIDER" notes show "$IDX"
+    assert_contains "Appended line one." "append: text was appended"
+    assert_contains "Original append body." "append: original body preserved"
+
+    # Stdin append
+    echo "Piped append text." | "$CIDER" notes append "$IDX" 2>/dev/null
+    run "$CIDER" notes show "$IDX"
+    assert_contains "Piped append text." "append (stdin): piped text appended"
+
+    # --no-newline
+    run "$CIDER" notes append "$IDX" " SUFFIX" --no-newline
+    run "$CIDER" notes show "$IDX"
+    assert_contains "Piped append text. SUFFIX" "append --no-newline: no separator"
+
+    # Error: no text
+    run "$CIDER" notes append "$IDX"
+    assert_rc 1 "append: error when no text provided"
+fi
+
+# ── Test: notes prepend ──────────────────────────────────────────────────────
+
+log "Testing: notes prepend"
+
+IDX=$(find_note "CiderTest Prepend")
+if [ -z "$IDX" ]; then
+    fail "prepend" "Could not find CiderTest Prepend"
+else
+    # Basic prepend
+    run "$CIDER" notes prepend "$IDX" "Prepended after title."
+    assert_rc 0 "prepend: exits 0"
+    assert_contains "✓" "prepend: success message"
+
+    run "$CIDER" notes show "$IDX"
+    assert_contains "Prepended after title." "prepend: text was prepended"
+    assert_contains "Original prepend body." "prepend: original body preserved"
+
+    # Stdin prepend
+    echo "Piped prepend text." | "$CIDER" notes prepend "$IDX" 2>/dev/null
+    run "$CIDER" notes show "$IDX"
+    assert_contains "Piped prepend text." "prepend (stdin): piped text prepended"
+
+    # Error: no text
+    run "$CIDER" notes prepend "$IDX"
+    assert_rc 1 "prepend: error when no text provided"
+fi
+
+# ── Test: notes debug ────────────────────────────────────────────────────────
+
+log "Testing: notes debug"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes debug "$IDX"
+    assert_rc 0 "debug: exits 0"
+    assert_contains "Debug:" "debug: shows debug header"
+    assert_contains "Raw text length:" "debug: shows raw text length"
+    assert_contains "attribute keys" "debug: shows attribute key summary"
 fi
 
 # ── Test: notes attach + attachments + detach ────────────────────────────────

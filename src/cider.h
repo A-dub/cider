@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.3.0"
+#define VERSION "3.4.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -105,6 +105,9 @@ void cmdNotesDelete(NSUInteger idx);
 void cmdNotesMove(NSUInteger idx, NSString *targetFolderName);
 void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
                     BOOL titleOnly, BOOL bodyOnly, NSString *folder);
+int  cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
+int  cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
+void cmdNotesDebug(NSUInteger idx, NSString *folder);
 void cmdNotesExport(NSString *exportPath);
 void cmdNotesAttachments(NSUInteger idx, BOOL jsonOut);
 void cmdNotesAttach(NSUInteger idx, NSString *filePath);

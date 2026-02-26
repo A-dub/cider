@@ -628,6 +628,176 @@ void cmdNotesMove(NSUInteger idx, NSString *targetFolderName) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMANDS: append / prepend
+// ─────────────────────────────────────────────────────────────────────────────
+
+int cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *raw = noteRawText(note);
+    NSString *newText;
+    if (noNewline) {
+        newText = [raw stringByAppendingString:text];
+    } else {
+        newText = [NSString stringWithFormat:@"%@\n%@", raw, text];
+    }
+
+    if (!applyCRDTEdit(note, raw, newText)) {
+        fprintf(stderr, "Error: Failed to append to note\n");
+        return 1;
+    }
+    if (!saveContext()) {
+        fprintf(stderr, "Error: Failed to save after append\n");
+        return 1;
+    }
+    printf("✓ Appended to note %lu\n", (unsigned long)idx);
+    return 0;
+}
+
+int cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *raw = noteRawText(note);
+    NSRange nlRange = [raw rangeOfString:@"\n"];
+    NSString *newText;
+
+    if (nlRange.location == NSNotFound) {
+        // Note has only a title line (no body)
+        if (noNewline) {
+            newText = [NSString stringWithFormat:@"%@%@", raw, text];
+        } else {
+            newText = [NSString stringWithFormat:@"%@\n%@", raw, text];
+        }
+    } else {
+        NSString *title = [raw substringToIndex:nlRange.location];
+        NSString *rest = [raw substringFromIndex:nlRange.location + 1];
+        if (noNewline) {
+            newText = [NSString stringWithFormat:@"%@\n%@%@", title, text, rest];
+        } else {
+            newText = [NSString stringWithFormat:@"%@\n%@\n%@", title, text, rest];
+        }
+    }
+
+    if (!applyCRDTEdit(note, raw, newText)) {
+        fprintf(stderr, "Error: Failed to prepend to note\n");
+        return 1;
+    }
+    if (!saveContext()) {
+        fprintf(stderr, "Error: Failed to save after prepend\n");
+        return 1;
+    }
+    printf("✓ Prepended to note %lu\n", (unsigned long)idx);
+    return 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMAND: debug (dump attributed string attributes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdNotesDebug(NSUInteger idx, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *title = noteTitle(note);
+    printf("Debug: \"%s\" (note %lu)\n\n", [title UTF8String], (unsigned long)idx);
+
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        printf("  (no mergeableString)\n");
+        return;
+    }
+
+    NSString *raw = noteRawText(note);
+    printf("Raw text length: %lu characters\n\n", (unsigned long)[raw length]);
+
+    // Get the full attributed string
+    id attrString = nil;
+    @try {
+        attrString = ((id (*)(id, SEL))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"attributedString"));
+    }
+    @catch (NSException *e) {
+        printf("  (attributedString not available: %s)\n",
+               [[e reason] UTF8String]);
+        return;
+    }
+    if (!attrString || ![attrString isKindOfClass:[NSAttributedString class]]) {
+        printf("  (attributedString returned nil or non-NSAttributedString)\n");
+        return;
+    }
+
+    // Collect unique attribute keys across all ranges
+    NSMutableDictionary *attrSummary = [NSMutableDictionary dictionary];
+    NSUInteger len = [(NSAttributedString *)attrString length];
+    NSUInteger pos = 0;
+
+    while (pos < len) {
+        NSRange effRange;
+        NSDictionary *attrs = [(NSAttributedString *)attrString
+            attributesAtIndex:pos effectiveRange:&effRange];
+
+        for (NSString *key in attrs) {
+            id val = attrs[key];
+            NSString *valDesc = [NSString stringWithFormat:@"%@ (%@)",
+                [val description], NSStringFromClass([val class])];
+
+            // Track ranges per key
+            NSMutableArray *ranges = attrSummary[key];
+            if (!ranges) {
+                ranges = [NSMutableArray array];
+                attrSummary[key] = ranges;
+            }
+            [ranges addObject:@{
+                @"range": NSStringFromRange(effRange),
+                @"value": valDesc,
+                @"char": (effRange.location < [raw length])
+                    ? [NSString stringWithFormat:@"%C",
+                       [raw characterAtIndex:effRange.location]]
+                    : @"?"
+            }];
+        }
+        pos = effRange.location + effRange.length;
+    }
+
+    // Print summary
+    printf("Attributed string attribute keys found: %lu\n\n",
+           (unsigned long)[attrSummary count]);
+
+    for (NSString *key in [[attrSummary allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+        NSArray *ranges = attrSummary[key];
+        printf("  Key: \"%s\" (%lu occurrence(s))\n",
+               [key UTF8String], (unsigned long)ranges.count);
+        for (NSDictionary *info in ranges) {
+            printf("    Range: %s  Char: '%s'\n",
+                   [info[@"range"] UTF8String],
+                   [info[@"char"] UTF8String]);
+            // Truncate long value descriptions
+            NSString *valStr = info[@"value"];
+            if ([valStr length] > 200) {
+                valStr = [[valStr substringToIndex:200] stringByAppendingString:@"..."];
+            }
+            printf("    Value: %s\n", [valStr UTF8String]);
+        }
+        printf("\n");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMANDS: search
+// ─────────────────────────────────────────────────────────────────────────────
+
 void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
                     BOOL titleOnly, BOOL bodyOnly, NSString *folder) {
     NSArray *results = nil;

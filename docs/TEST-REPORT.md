@@ -1,6 +1,6 @@
-# Cider v3.3.0 — Test Report
+# Cider v3.4.0 — Test Report
 
-> Generated: 2026-02-25 19:39:26
+> Generated: 2026-02-26 17:47:20
 >
 > This report shows **before and after** state for every cider operation,
 > demonstrating how each command works with real Apple Notes data.
@@ -15,14 +15,14 @@
 
 ```
 $ ./cider --version
-cider v3.3.0
+cider v3.4.0
 ```
 
 ### Test 02: Help (top-level)
 
 ```
 $ ./cider --help
-cider v3.3.0 — Apple Notes CLI with CRDT attachment support
+cider v3.4.0 — Apple Notes CLI with CRDT attachment support
 
 USAGE:
   cider notes [subcommand]   Notes operations
@@ -43,6 +43,10 @@ NOTES SUBCOMMANDS:
                                        Find & replace in note N (full content)
   replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]
                                        Find & replace across multiple notes
+  append <N> <text> [--no-newline] [-f <folder>]
+                                       Append text to end of note N
+  prepend <N> <text> [--no-newline] [-f <folder>]
+                                       Insert text after title of note N
   search <query> [--json] [--regex] [--title] [--body] [-f <folder>]
                                        Search notes (title + body by default)
   export <path>                       Export all notes to HTML
@@ -96,7 +100,7 @@ Shows the full search/replace documentation with all flags and examples.
 
 ```
 $ ./cider notes --help
-cider notes v3.3.0 — Apple Notes CLI
+cider notes v3.4.0 — Apple Notes CLI
 
 USAGE:
   cider notes                              List all notes
@@ -113,6 +117,30 @@ USAGE:
   cider notes attachments <N> [--json]     List attachments with positions
   cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)
   cider notes detach <N> [<A>]             Remove attachment A from note N
+
+APPEND / PREPEND:
+  cider notes append <N> <text> [options]
+  cider notes prepend <N> <text> [options]
+
+  Append adds text to the end of the note. Prepend inserts text right
+  after the title line. Both support stdin piping.
+
+  --no-newline     Don't add newline separator
+  -f, --folder <f> Scope note index to folder
+
+  Examples:
+    cider notes append 3 "Added at the bottom"
+    cider notes prepend 3 "Inserted after title"
+    echo "piped text" | cider notes append 3
+    cider notes append 3 "no gap" --no-newline
+    cider notes prepend 3 "text" -f "Work Notes"
+
+DEBUG:
+  cider notes debug <N> [-f <folder>]
+
+  Dumps all attributed string attribute keys and values for a note.
+  Useful for discovering how Apple Notes stores checklists, tables,
+  links, and other rich formatting internally.
 
 SEARCH:
   cider notes search <query> [options]
@@ -940,10 +968,118 @@ No matches found for "xyzNonexistent99" in folder "Cider Tests".
 
 ---
 
-## Section 5: Edit (CRDT)
+## Section 5: Append / Prepend
 
 
-### Test 35: Edit via stdin pipe
+### Test 35: Append text to note
+
+
+**BEFORE**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Alpha
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Alpha
+This is the alpha note with some searchable content.
+```
+
+**COMMAND**
+
+```
+$ ./cider notes append 9 This line was appended.
+✓ Appended to note 9
+```
+
+**AFTER**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Alpha
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Alpha
+This is the alpha note with some searchable content.
+This line was appended.
+```
+
+### Test 36: Append via stdin pipe
+
+
+**BEFORE**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Beta
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Beta
+Beta note body. Contains the word pineapple.
+```
+
+**COMMAND**
+
+```
+$ echo "Piped content here." | cider notes append 8
+✓ Appended to note 8
+```
+
+**AFTER**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Beta
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Beta
+Beta note body. Contains the word pineapple.
+Piped content here.
+```
+
+### Test 37: Append `--no-newline`
+
+
+**BEFORE**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Alpha
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Alpha
+This is the alpha note with some searchable content.
+This line was appended.
+```
+
+**COMMAND**
+
+Appends without a newline separator — text is concatenated directly.
+
+```
+$ ./cider notes append 9  (suffix) --no-newline
+✓ Appended to note 9
+```
+
+**AFTER**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Alpha
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Alpha
+This is the alpha note with some searchable content.
+This line was appended. (suffix)
+```
+
+### Test 38: Prepend text after title
 
 
 **BEFORE**
@@ -955,6 +1091,99 @@ No matches found for "xyzNonexistent99" in folder "Cider Tests".
 ╚══════════════════════════════════════════╝
 
 CiderTest Gamma
+Gamma note for TESTING and replacing text.
+```
+
+**COMMAND**
+
+```
+$ ./cider notes prepend 7 Prepended after the title line.
+✓ Prepended to note 7
+```
+
+**AFTER**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Gamma
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Gamma
+Prepended after the title line.
+Gamma note for TESTING and replacing text.
+```
+
+### Test 39: Prepend via stdin pipe
+
+
+**BEFORE**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Gamma
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Gamma
+Prepended after the title line.
+Gamma note for TESTING and replacing text.
+```
+
+**COMMAND**
+
+```
+$ echo "Piped prepend." | cider notes prepend 7
+✓ Prepended to note 7
+```
+
+**AFTER**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Gamma
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Gamma
+Piped prepend.
+Prepended after the title line.
+Gamma note for TESTING and replacing text.
+```
+
+### Test 40: Debug — dump attributed string attributes
+
+Shows all NSAttributedString attribute keys and values stored in the note's CRDT.
+
+```
+$ ./cider notes debug 9
+Debug: "CiderTest Alpha" (note 9)
+
+Raw text length: 101 characters
+
+Attributed string attribute keys found: 0
+
+```
+
+---
+
+## Section 6: Edit (CRDT)
+
+
+### Test 41: Edit via stdin pipe
+
+
+**BEFORE**
+
+```
+╔══════════════════════════════════════════╗
+  CiderTest Gamma
+  Folder: Cider Tests
+╚══════════════════════════════════════════╝
+
+CiderTest Gamma
+Piped prepend.
+Prepended after the title line.
 Gamma note for TESTING and replacing text.
 ```
 
@@ -978,7 +1207,7 @@ CiderTest Gamma
 Gamma note fully rewritten via stdin pipe.
 ```
 
-### Test 36: Add note via stdin pipe
+### Test 42: Add note via stdin pipe
 
 
 **BEFORE**
@@ -1009,10 +1238,10 @@ Found 1 note(s) matching "CiderTest Piped":
 
 ---
 
-## Section 6: Attachments
+## Section 7: Attachments
 
 
-### Test 37: Attach file to note
+### Test 43: Attach file to note
 
 
 **BEFORE: Attachments**
@@ -1026,7 +1255,7 @@ No attachments in "CiderTest Attach"
 
 ```
 $ ./cider notes attach 6 /tmp/cider_report_attach.txt
-✓ Attachment inserted at position 73 in "CiderTest Attach" (id: 014412BA-F64D-443A-89B7-3D1B56027DEC)
+✓ Attachment inserted at position 73 in "CiderTest Attach" (id: BF8878F2-EED2-435A-8275-0364BF2D88D7)
 ```
 
 **AFTER: Attachments**
@@ -1037,14 +1266,14 @@ Attachments in "CiderTest Attach":
   1. [public.plain-text]  (public.plain-text, position 73)
 ```
 
-### Test 38: List attachments (JSON)
+### Test 44: List attachments (JSON)
 
 ```
 $ ./cider notes attachments 6 --json
-[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":73,"id":"014412BA-F64D-443A-89B7-3D1B56027DEC"}]
+[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":73,"id":"BF8878F2-EED2-435A-8275-0364BF2D88D7"}]
 ```
 
-### Test 39: Detach attachment
+### Test 45: Detach attachment
 
 
 **BEFORE**
@@ -1069,21 +1298,21 @@ $ ./cider notes attachments 6
 No attachments in "CiderTest Attach"
 ```
 
-### Test 40: Attach at specific CRDT position
+### Test 46: Attach at specific CRDT position
 
 
 **COMMAND**
 
 ```
 $ ./cider notes attach 6 /tmp/cider_report_pos.txt --at 5
-✓ Attachment inserted at position 5 in "CiderTest Attach" (id: 7CDDF1AB-1C14-41B3-82DE-D248DB33DF6D)
+✓ Attachment inserted at position 5 in "CiderTest Attach" (id: 77D4D40D-4CAC-4E48-A7BC-C1E74D16F6B1)
 ```
 
 **AFTER (JSON — note position field)**
 
 ```
 $ ./cider notes attachments 6 --json
-[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":5,"id":"7CDDF1AB-1C14-41B3-82DE-D248DB33DF6D"}]
+[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":5,"id":"77D4D40D-4CAC-4E48-A7BC-C1E74D16F6B1"}]
 ```
 
 Cleanup:
@@ -1095,10 +1324,10 @@ $ ./cider notes detach 6 1
 
 ---
 
-## Section 7: Move
+## Section 8: Move
 
 
-### Test 41: Move note to different folder
+### Test 47: Move note to different folder
 
 
 **BEFORE**
@@ -1129,10 +1358,10 @@ Moved "CiderTest Beta" → "Cider Tests"
 
 ---
 
-## Section 8: Delete
+## Section 9: Delete
 
 
-### Test 42: Delete note
+### Test 48: Delete note
 
 
 **BEFORE**
@@ -1162,15 +1391,15 @@ No notes found matching "CiderTest Delta"
 
 ---
 
-## Section 9: Export
+## Section 10: Export
 
 
-### Test 43: Export all notes to HTML
+### Test 49: Export all notes to HTML
 
 ```
-$ ./cider notes export /tmp/cider_report_export_24095
-Exported 578 notes to: /tmp/cider_report_export_24095
-Index:    /tmp/cider_report_export_24095/index.html
+$ ./cider notes export /tmp/cider_report_export_4640
+Exported 578 notes to: /tmp/cider_report_export_4640
+Index:    /tmp/cider_report_export_4640/index.html
 ```
 
 Files created:
@@ -1178,47 +1407,47 @@ Files created:
 ```
 579 HTML files exported
 Sample files:
-/tmp/cider_report_export_24095/0001_CiderTest Beta.html
-/tmp/cider_report_export_24095/0002_CiderTest Piped.html
-/tmp/cider_report_export_24095/0003_CiderTest CaseTest.html
-/tmp/cider_report_export_24095/0004_CiderTest ReplAll2.html
-/tmp/cider_report_export_24095/0005_CiderTest ReplAll1.html
+/tmp/cider_report_export_4640/0001_CiderTest Beta.html
+/tmp/cider_report_export_4640/0002_CiderTest Piped.html
+/tmp/cider_report_export_4640/0003_CiderTest CaseTest.html
+/tmp/cider_report_export_4640/0004_CiderTest ReplAll2.html
+/tmp/cider_report_export_4640/0005_CiderTest ReplAll1.html
 ```
 
 ---
 
-## Section 10: Error Handling
+## Section 11: Error Handling
 
 
-### Test 44: Show nonexistent note
+### Test 50: Show nonexistent note
 
 ```
 $ ./cider notes show 99999
 Error: Note 99999 not found
 ```
 
-### Test 45: Replace in nonexistent note
+### Test 51: Replace in nonexistent note
 
 ```
 $ ./cider notes replace 99999 --find x --replace y
 Error: Note 99999 not found
 ```
 
-### Test 46: Detach from nonexistent note
+### Test 52: Detach from nonexistent note
 
 ```
 $ ./cider notes detach 99999 1
 Error: Note 99999 not found
 ```
 
-### Test 47: Attach nonexistent file
+### Test 53: Attach nonexistent file
 
 ```
 $ ./cider notes attach 9 /nonexistent/file.txt
 Error: File not found: /nonexistent/file.txt
 ```
 
-### Test 48: Unknown command
+### Test 54: Unknown command
 
 ```
 $ ./cider bogus
@@ -1226,12 +1455,12 @@ Unknown command: bogus
 Run 'cider --help' for usage.
 ```
 
-### Test 49: Unknown notes subcommand
+### Test 55: Unknown notes subcommand
 
 ```
 $ ./cider notes bogus
 Unknown notes subcommand: bogus
-cider notes v3.3.0 — Apple Notes CLI
+cider notes v3.4.0 — Apple Notes CLI
 
 USAGE:
   cider notes                              List all notes
@@ -1248,6 +1477,30 @@ USAGE:
   cider notes attachments <N> [--json]     List attachments with positions
   cider notes attach <N> <file> [--at <pos>]  Attach file at position (CRDT)
   cider notes detach <N> [<A>]             Remove attachment A from note N
+
+APPEND / PREPEND:
+  cider notes append <N> <text> [options]
+  cider notes prepend <N> <text> [options]
+
+  Append adds text to the end of the note. Prepend inserts text right
+  after the title line. Both support stdin piping.
+
+  --no-newline     Don't add newline separator
+  -f, --folder <f> Scope note index to folder
+
+  Examples:
+    cider notes append 3 "Added at the bottom"
+    cider notes prepend 3 "Inserted after title"
+    echo "piped text" | cider notes append 3
+    cider notes append 3 "no gap" --no-newline
+    cider notes prepend 3 "text" -f "Work Notes"
+
+DEBUG:
+  cider notes debug <N> [-f <folder>]
+
+  Dumps all attributed string attribute keys and values for a note.
+  Useful for discovering how Apple Notes stores checklists, tables,
+  links, and other rich formatting internally.
 
 SEARCH:
   cider notes search <query> [options]
@@ -1305,7 +1558,7 @@ Interactive mode: if <N> is omitted from edit/delete/move/show/replace/attach,
 you'll be prompted to enter it (when stdin is a terminal).
 ```
 
-### Test 50: Missing replace arguments
+### Test 56: Missing replace arguments
 
 ```
 $ ./cider notes replace 1 --find x
@@ -1314,10 +1567,10 @@ Usage: cider notes replace <N> --find <text> --replace <text> [--regex] [-i]
 
 ---
 
-## Section 11: Backward Compatibility
+## Section 12: Backward Compatibility
 
 
-### Test 51: Legacy `-fl` (folders)
+### Test 57: Legacy `-fl` (folders)
 
 ```
 $ ./cider notes -fl
@@ -1349,7 +1602,7 @@ Folders:
 Total: 23 folder(s)
 ```
 
-### Test 52: Legacy `-v` (view)
+### Test 58: Legacy `-v` (view)
 
 ```
 $ ./cider notes -v 9
@@ -1360,9 +1613,10 @@ $ ./cider notes -v 9
 
 CiderTest Alpha
 This is the alpha note with some searchable content.
+This line was appended. (suffix)
 ```
 
-### Test 53: Legacy `-s` (search)
+### Test 59: Legacy `-s` (search)
 
 ```
 $ ./cider notes -s CiderTest Beta
@@ -1373,7 +1627,7 @@ Found 1 note(s) matching "CiderTest Beta":
   1 CiderTest Beta                             Cider Tests           
 ```
 
-### Test 54: Legacy `-f` (folder filter)
+### Test 60: Legacy `-f` (folder filter)
 
 ```
 $ ./cider notes -f Cider Tests
@@ -1410,4 +1664,4 @@ Delete note "CiderTest Piped"? (y/N) Deleted: "CiderTest Piped"
 
 ---
 
-*Report complete — 54 test cases demonstrated. All test notes cleaned up.*
+*Report complete — 60 test cases demonstrated. All test notes cleaned up.*
