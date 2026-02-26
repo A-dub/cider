@@ -24,13 +24,15 @@ void printHelp(void) {
 "\n"
 "NOTES SUBCOMMANDS:\n"
 "  list [-f <folder>] [--json] [--after <date>] [--before <date>] [--sort <mode>]\n"
-"                                       List notes (default when no subcommand)\n"
+"       [--pinned]                      List notes (default when no subcommand)\n"
 "  show <N> [--json]                   View note N  (also: cider notes <N>)\n"
 "  folders [--json]                    List all folders\n"
 "  add [--folder <f>]                  Add note (stdin or $EDITOR)\n"
 "  edit <N>                            Edit note N (CRDT — preserves attachments!)\n"
 "  delete <N>                          Delete note N\n"
 "  move <N> <folder>                   Move note N to folder\n"
+"  pin <N>                             Pin note N\n"
+"  unpin <N>                           Unpin note N\n"
 "  replace <N> --find <s> --replace <s> [--regex] [-i]\n"
 "                                       Find & replace in note N (full content)\n"
 "  replace --all --find <s> --replace <s> [--folder <f>] [--regex] [-i] [--dry-run]\n"
@@ -124,6 +126,19 @@ void printNotesHelp(void) {
 "    cider notes append 3 \"no gap\" --no-newline\n"
 "    cider notes prepend 3 \"text\" -f \"Work Notes\"\n"
 "\n"
+"PIN / UNPIN:\n"
+"  cider notes pin <N> [-f <folder>]\n"
+"  cider notes unpin <N> [-f <folder>]\n"
+"\n"
+"  Pin or unpin a note. Pinned notes appear at the top in Apple Notes.\n"
+"  Use --pinned with list to show only pinned notes.\n"
+"\n"
+"  Examples:\n"
+"    cider notes pin 3\n"
+"    cider notes unpin 3\n"
+"    cider notes list --pinned\n"
+"    cider notes pin 1 -f Work\n"
+"\n"
 "DEBUG:\n"
 "  cider notes debug <N> [-f <folder>]\n"
 "\n"
@@ -137,6 +152,7 @@ void printNotesHelp(void) {
 "  --after <date>              Notes modified after date\n"
 "  --before <date>             Notes modified before date\n"
 "  --sort created|modified|title  Sort order (default: title)\n"
+"  --pinned                   Show only pinned notes\n"
 "  -f, --folder <f>           Filter by folder\n"
 "  --json                     JSON output (includes created/modified dates)\n"
 "\n"
@@ -291,7 +307,7 @@ int main(int argc, char *argv[]) {
             if (!initNotesContext()) return 1;
 
             if (argc == 2) {
-                cmdNotesList(nil, NO, nil, nil, nil);
+                cmdNotesList(nil, NO, nil, nil, nil, NO);
                 return 0;
             }
 
@@ -312,7 +328,8 @@ int main(int argc, char *argv[]) {
                 NSString *afterStr = argValue(argc, argv, 3, "--after", NULL);
                 NSString *beforeStr = argValue(argc, argv, 3, "--before", NULL);
                 NSString *sortMode = argValue(argc, argv, 3, "--sort", NULL);
-                cmdNotesList(folder, jsonOut, afterStr, beforeStr, sortMode);
+                BOOL pinnedOnly = argHasFlag(argc, argv, 3, "--pinned", NULL);
+                cmdNotesList(folder, jsonOut, afterStr, beforeStr, sortMode, pinnedOnly);
 
             // ── cider notes show ──
             } else if ([sub isEqualToString:@"show"]) {
@@ -483,6 +500,30 @@ int main(int argc, char *argv[]) {
                 if (!idx) return 1;
                 cmdNotesDebug(idx, folder);
 
+            // ── cider notes pin ──
+            } else if ([sub isEqualToString:@"pin"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"pin", folder);
+                if (!idx) return 1;
+                return cmdNotesPin(idx, folder);
+
+            // ── cider notes unpin ──
+            } else if ([sub isEqualToString:@"unpin"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"unpin", folder);
+                if (!idx) return 1;
+                return cmdNotesUnpin(idx, folder);
+
             // ── cider notes replace ──
             } else if ([sub isEqualToString:@"replace"]) {
                 BOOL useRegex = argHasFlag(argc, argv, 3, "--regex", NULL);
@@ -648,7 +689,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 NSString *folder = [NSString stringWithUTF8String:argv[3]];
-                cmdNotesList(folder, NO, nil, nil, nil);
+                cmdNotesList(folder, NO, nil, nil, nil, NO);
 
             } else if ([sub isEqualToString:@"-v"]) {
                 if (argc < 4) {

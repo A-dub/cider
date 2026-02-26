@@ -14,7 +14,7 @@ NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
         return 0;
     }
 
-    cmdNotesList(folder, NO, nil, nil, nil);
+    cmdNotesList(folder, NO, nil, nil, nil, NO);
 
     printf("\nEnter note number to %s: ", verb ? [verb UTF8String] : "select");
     fflush(stdout);
@@ -34,8 +34,20 @@ NSUInteger promptNoteIndex(NSString *verb, NSString *folder) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void cmdNotesList(NSString *folder, BOOL jsonOutput,
-                  NSString *afterStr, NSString *beforeStr, NSString *sortMode) {
+                  NSString *afterStr, NSString *beforeStr, NSString *sortMode,
+                  BOOL pinnedOnly) {
     NSArray *notes = filteredNotes(folder);
+
+    // Pinned filter
+    if (pinnedOnly) {
+        NSMutableArray *pinned = [NSMutableArray array];
+        for (id note in notes) {
+            BOOL isPinned = ((BOOL (*)(id, SEL))objc_msgSend)(
+                note, NSSelectorFromString(@"isPinned"));
+            if (isPinned) [pinned addObject:note];
+        }
+        notes = pinned;
+    }
 
     // Date filtering
     NSDate *afterDate = afterStr ? parseDateString(afterStr) : nil;
@@ -991,6 +1003,52 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
                [padRight(f, 22) UTF8String]);
         i++;
     }
+}
+
+int cmdNotesPin(NSUInteger idx, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    BOOL isPinned = ((BOOL (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"isPinned"));
+    if (isPinned) {
+        printf("Note %lu is already pinned.\n", (unsigned long)idx);
+        return 0;
+    }
+
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        note, NSSelectorFromString(@"setIsPinned:"), YES);
+
+    if (!saveContext()) return 1;
+    printf("📌 Pinned note %lu: \"%s\"\n", (unsigned long)idx,
+           [noteTitle(note) UTF8String]);
+    return 0;
+}
+
+int cmdNotesUnpin(NSUInteger idx, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    BOOL isPinned = ((BOOL (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"isPinned"));
+    if (!isPinned) {
+        printf("Note %lu is not pinned.\n", (unsigned long)idx);
+        return 0;
+    }
+
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        note, NSSelectorFromString(@"setIsPinned:"), NO);
+
+    if (!saveContext()) return 1;
+    printf("📌 Unpinned note %lu: \"%s\"\n", (unsigned long)idx,
+           [noteTitle(note) UTF8String]);
+    return 0;
 }
 
 void cmdNotesExport(NSString *exportPath) {

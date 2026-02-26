@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.5.0"
+#define VERSION "3.6.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +95,8 @@ NSDate *parseDateString(NSString *str);
 
 NSUInteger promptNoteIndex(NSString *verb, NSString *folder);
 void cmdNotesList(NSString *folder, BOOL jsonOutput,
-                  NSString *afterStr, NSString *beforeStr, NSString *sortMode);
+                  NSString *afterStr, NSString *beforeStr, NSString *sortMode,
+                  BOOL pinnedOnly);
 void cmdFoldersList(BOOL jsonOutput);
 int  cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput);
 void cmdNotesAdd(NSString *folderName);
@@ -112,6 +113,8 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
 int  cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 int  cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 void cmdNotesDebug(NSUInteger idx, NSString *folder);
+int  cmdNotesPin(NSUInteger idx, NSString *folder);
+int  cmdNotesUnpin(NSUInteger idx, NSString *folder);
 void cmdNotesExport(NSString *exportPath);
 void cmdNotesAttachments(NSUInteger idx, BOOL jsonOut);
 void cmdNotesAttach(NSUInteger idx, NSString *filePath);

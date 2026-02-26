@@ -728,6 +728,41 @@ assert_contains "CiderTest" "search --after today: finds test notes"
 run "$CIDER" notes search "CiderTest" --before "2020-01-01"
 assert_contains "No notes found" "search --before old date: no results"
 
+# ── Test: pin / unpin ───────────────────────────────────────────────────────
+
+log "Testing: pin / unpin"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "pin" "Could not find CiderTest Alpha"
+else
+    # Pin a note
+    run "$CIDER" notes pin "$IDX"
+    assert_rc 0 "pin: exits 0"
+    assert_contains "Pinned" "pin: success message"
+
+    # Pin again (should say already pinned)
+    run "$CIDER" notes pin "$IDX"
+    assert_contains "already pinned" "pin: already pinned message"
+
+    # List --pinned should include it
+    run "$CIDER" notes list --pinned
+    assert_contains "CiderTest Alpha" "list --pinned: shows pinned note"
+
+    # Unpin
+    run "$CIDER" notes unpin "$IDX"
+    assert_rc 0 "unpin: exits 0"
+    assert_contains "Unpinned" "unpin: success message"
+
+    # Unpin again (should say not pinned)
+    run "$CIDER" notes unpin "$IDX"
+    assert_contains "not pinned" "unpin: not pinned message"
+fi
+
+# Pin nonexistent note
+run "$CIDER" notes pin 99999
+assert_rc 1 "pin: nonexistent note returns exit 1"
+
 # ── Test: error handling ─────────────────────────────────────────────────────
 
 log "Testing: error handling"

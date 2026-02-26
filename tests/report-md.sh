@@ -443,7 +443,29 @@ cmd "$CIDER" notes list --after "not-a-date"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 7: Edit (CRDT)\n\n"
+printf "\n---\n\n## Section 7: Pin / Unpin\n\n"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+header "Pin a note"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes pin "$IDX"
+
+header "Pin already-pinned note"
+cmd "$CIDER" notes pin "$IDX"
+
+header "List pinned notes"
+cmd "$CIDER" notes list --pinned
+
+header "Unpin a note"
+cmd "$CIDER" notes unpin "$IDX"
+
+header "Unpin non-pinned note"
+cmd "$CIDER" notes unpin "$IDX"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+printf "\n---\n\n## Section 8: Edit (CRDT)\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -472,7 +494,7 @@ cmd "$CIDER" notes search "CiderTest Piped"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 8: Attachments\n\n"
+printf "\n---\n\n## Section 9: Attachments\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -519,7 +541,7 @@ rm -f /tmp/cider_report_attach.txt /tmp/cider_report_pos.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 9: Move\n\n"
+printf "\n---\n\n## Section 10: Move\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -545,7 +567,7 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 10: Delete\n\n"
+printf "\n---\n\n## Section 11: Delete\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -563,7 +585,7 @@ cmd "$CIDER" notes search "CiderTest Delta"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 11: Export\n\n"
+printf "\n---\n\n## Section 12: Export\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -580,7 +602,7 @@ rm -rf "$EXPORT_DIR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 12: Error Handling\n\n"
+printf "\n---\n\n## Section 13: Error Handling\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -608,7 +630,7 @@ cmd "$CIDER" notes replace 1 --find "x"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n---\n\n## Section 13: Backward Compatibility\n\n"
+printf "\n---\n\n## Section 14: Backward Compatibility\n\n"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
