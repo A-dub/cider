@@ -48,6 +48,7 @@ void printHelp(void) {
 "  links <N> [--json]                 Show outgoing note links\n"
 "  backlinks <N> [--json]             Show notes linking to note N\n"
 "  backlinks --all [--json]           Full link graph\n"
+"  link <N> <target title>            Create link to another note\n"
 "  folder create <name> [--parent <p>] Create a new folder\n"
 "  folder delete <name>                Delete empty folder\n"
 "  folder rename <old> <new>           Rename folder\n"
@@ -255,14 +256,16 @@ void printNotesHelp(void) {
 "  cider notes links <N> [--json]             Show outgoing note links\n"
 "  cider notes backlinks <N> [--json]         Show notes linking to note N\n"
 "  cider notes backlinks --all [--json]       Full link graph\n"
+"  cider notes link <N> <target title>       Create link to another note\n"
 "\n"
-"  Links are created in Apple Notes using the >> syntax. Cider reads\n"
-"  these native note-to-note links and resolves them to note titles/indices.\n"
+"  Links use Apple Notes native inline attachments (same as >> syntax).\n"
+"  Cider can both create and read note-to-note links.\n"
 "\n"
 "  Examples:\n"
 "    cider notes links 5                Show what note 5 links to\n"
 "    cider notes backlinks 5            Show notes that link to note 5\n"
 "    cider notes backlinks --all        Full link graph across all notes\n"
+"    cider notes link 5 Meeting Notes   Link note 5 to \"Meeting Notes\"\n"
 "    cider notes links 5 --json         JSON output\n"
 "\n"
 "FOLDER MANAGEMENT:\n"
@@ -746,6 +749,34 @@ int main(int argc, char *argv[]) {
                     if (!idx) return 1;
                     cmdNotesBacklinks(idx, folder, jsonOut);
                 }
+
+            // ── cider notes link ──
+            } else if ([sub isEqualToString:@"link"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                NSString *target = nil;
+                if (argc >= 5) {
+                    // Collect remaining args as target title
+                    NSMutableArray *parts = [NSMutableArray array];
+                    for (int i = 4; i < argc; i++) {
+                        NSString *a = [NSString stringWithUTF8String:argv[i]];
+                        if ([a hasPrefix:@"--"] || [a hasPrefix:@"-f"]) break;
+                        [parts addObject:a];
+                    }
+                    if (parts.count > 0)
+                        target = [parts componentsJoinedByString:@" "];
+                }
+                if (!idx) idx = promptNoteIndex(@"link from", folder);
+                if (!idx) return 1;
+                if (!target || target.length == 0) {
+                    fprintf(stderr, "Usage: cider notes link <N> <target note title>\n");
+                    return 1;
+                }
+                return cmdNotesLink(idx, target, folder);
 
             // ── cider notes share ──
             } else if ([sub isEqualToString:@"share"]) {

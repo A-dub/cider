@@ -817,14 +817,14 @@ IDX=$(find_note "CiderTest Alpha")
 if [ -z "$IDX" ]; then
     fail "tag" "Could not find CiderTest Alpha"
 else
-    # Add a tag
+    # Add a native tag
     run "$CIDER" notes tag "$IDX" "cidertest"
     assert_rc 0 "tag: exits 0"
     assert_contains "Added #cidertest" "tag: success message"
 
-    # Verify tag in note body
-    run "$CIDER" notes show "$IDX"
-    assert_contains "#cidertest" "tag: tag appears in note"
+    # Verify tag via tags list (native tags are inline attachments, not plain text)
+    run "$CIDER" notes tags
+    assert_contains "#cidertest" "tag: tag appears in tags list"
 
     # Duplicate tag detection
     run "$CIDER" notes tag "$IDX" "#cidertest"
@@ -834,7 +834,7 @@ else
     run "$CIDER" notes tag "$IDX" "test-tag"
     assert_rc 0 "tag: hyphen tag exits 0"
 
-    # List all tags
+    # List all tags (includes native inline attachment tags)
     run "$CIDER" notes tags
     assert_contains "#cidertest" "tags: lists cidertest tag"
     assert_contains "#test-tag" "tags: lists hyphen tag"
@@ -847,11 +847,11 @@ else
     run "$CIDER" notes tags --json
     assert_contains '"tag"' "tags --json: JSON output"
 
-    # Filter by tag
+    # Filter by tag (works with native tags)
     run "$CIDER" notes list --tag cidertest
     assert_contains "CiderTest Alpha" "list --tag: shows tagged note"
 
-    # Remove tag
+    # Remove native tag
     run "$CIDER" notes untag "$IDX" "cidertest"
     assert_rc 0 "untag: exits 0"
     assert_contains "Removed #cidertest" "untag: success message"

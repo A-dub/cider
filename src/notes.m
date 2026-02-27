@@ -4,6 +4,10 @@
 
 #import "cider.h"
 
+// Forward declarations for static helpers
+static NSArray *extractAllTags(id note);
+static BOOL noteHasTag(id note, NSString *tag);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Interactive prompt helper
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,21 +42,12 @@ void cmdNotesList(NSString *folder, BOOL jsonOutput,
                   BOOL pinnedOnly, NSString *tagFilter) {
     NSArray *notes = filteredNotes(folder);
 
-    // Tag filter
+    // Tag filter (checks both plain-text and native inline attachment tags)
     if (tagFilter) {
-        NSString *normalizedTag = [tagFilter hasPrefix:@"#"]
-            ? [tagFilter lowercaseString]
-            : [[@"#" stringByAppendingString:tagFilter] lowercaseString];
         NSMutableArray *tagFiltered = [NSMutableArray array];
         for (id note in notes) {
-            NSString *raw = noteRawText(note);
-            if (!raw) continue;
-            NSArray *tags = extractTags(raw);
-            for (NSString *t in tags) {
-                if ([[t lowercaseString] isEqualToString:normalizedTag]) {
-                    [tagFiltered addObject:note];
-                    break;
-                }
+            if (noteHasTag(note, tagFilter)) {
+                [tagFiltered addObject:note];
             }
         }
         notes = tagFiltered;
@@ -903,14 +898,6 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
     }
     BOOL hasDateFilter = (afterDate || beforeDate);
 
-    // Normalize tag filter
-    NSString *normalizedTag = nil;
-    if (tagFilter) {
-        normalizedTag = [tagFilter hasPrefix:@"#"]
-            ? [tagFilter lowercaseString]
-            : [[@"#" stringByAppendingString:tagFilter] lowercaseString];
-    }
-
     if (!useRegex && !bodyOnly && !folder && !hasDateFilter && !tagFilter) {
         // Fast path: Core Data predicate (existing behavior)
         NSPredicate *pred;
@@ -953,16 +940,9 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
             NSString *title = noteTitle(note);
             NSString *body = noteRawText(note);
 
-            // Tag filter
-            if (normalizedTag) {
-                NSArray *tags = extractTags(body);
-                BOOL hasTag = NO;
-                for (NSString *t in tags) {
-                    if ([[t lowercaseString] isEqualToString:normalizedTag]) {
-                        hasTag = YES; break;
-                    }
-                }
-                if (!hasTag) continue;
+            // Tag filter (checks both plain-text and native tags)
+            if (tagFilter) {
+                if (!noteHasTag(note, tagFilter)) continue;
             }
 
             if (!bodyOnly) {
@@ -1184,6 +1164,48 @@ NSArray *extractTags(NSString *text) {
     return [tags array];
 }
 
+// Extract tags from a note including native inline attachment hashtags
+static NSArray *extractAllTags(id note) {
+    NSMutableOrderedSet *tags = [NSMutableOrderedSet orderedSet];
+
+    // 1. Plain text tags from raw text
+    NSString *raw = noteRawText(note);
+    if (raw) {
+        NSArray *plainTags = extractTags(raw);
+        [tags addObjectsFromArray:plainTags];
+    }
+
+    // 2. Native inline attachment hashtags
+    @try {
+        SEL sel = NSSelectorFromString(@"allNoteTextInlineAttachments");
+        if ([note respondsToSelector:sel]) {
+            id inlineAtts = ((id (*)(id, SEL))objc_msgSend)(note, sel);
+            for (id att in inlineAtts) {
+                NSString *uti = ((id (*)(id, SEL))objc_msgSend)(
+                    att, NSSelectorFromString(@"typeUTI"));
+                if ([uti isEqualToString:@"com.apple.notes.inlinetextattachment.hashtag"]) {
+                    NSString *altText = ((id (*)(id, SEL))objc_msgSend)(
+                        att, NSSelectorFromString(@"altText"));
+                    if (altText) [tags addObject:altText];
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    return [tags array];
+}
+
+// Check if a note has a specific tag (plain text or native)
+static BOOL noteHasTag(id note, NSString *tag) {
+    NSString *normalized = [tag hasPrefix:@"#"] ? tag : [@"#" stringByAppendingString:tag];
+    NSArray *allTags = extractAllTags(note);
+    for (NSString *t in allTags) {
+        if ([[t lowercaseString] isEqualToString:[normalized lowercaseString]])
+            return YES;
+    }
+    return NO;
+}
+
 int cmdNotesTag(NSUInteger idx, NSString *tag, NSString *folder) {
     id note = noteAtIndex(idx, folder);
     if (!note) {
@@ -1191,25 +1213,102 @@ int cmdNotesTag(NSUInteger idx, NSString *tag, NSString *folder) {
         return 1;
     }
 
-    // Normalize tag
-    NSString *normalized = [tag hasPrefix:@"#"] ? tag : [@"#" stringByAppendingString:tag];
+    // Normalize tag (strip # prefix for internal use, keep for display)
+    NSString *displayTag = [tag hasPrefix:@"#"] ? tag : [@"#" stringByAppendingString:tag];
+    NSString *bareTag = [tag hasPrefix:@"#"] ? [tag substringFromIndex:1] : tag;
 
-    // Check if tag already exists (case-insensitive)
+    // Check if tag already exists via inline attachments
+    NSFetchRequest *existReq = [NSFetchRequest fetchRequestWithEntityName:@"ICInlineAttachment"];
+    existReq.predicate = [NSPredicate predicateWithFormat:
+        @"typeUTI == 'com.apple.notes.inlinetextattachment.hashtag' AND note == %@ AND tokenContentIdentifier ==[c] %@",
+        note, [bareTag uppercaseString]];
+    NSArray *existingTags = [g_moc executeFetchRequest:existReq error:nil];
+    if (existingTags.count > 0) {
+        printf("Note %lu already has tag %s\n", (unsigned long)idx,
+               [displayTag UTF8String]);
+        return 0;
+    }
+
+    // Also check plain-text tags
     NSString *raw = noteRawText(note);
     NSArray *existing = extractTags(raw);
     for (NSString *t in existing) {
-        if ([[t lowercaseString] isEqualToString:[normalized lowercaseString]]) {
+        if ([[t lowercaseString] isEqualToString:[displayTag lowercaseString]]) {
             printf("Note %lu already has tag %s\n", (unsigned long)idx,
                    [t UTF8String]);
             return 0;
         }
     }
 
-    // Append tag to end of note
-    NSString *newText = [NSString stringWithFormat:@"%@ %@", raw, normalized];
-    if (!applyCRDTEdit(note, raw, newText)) return 1;
+    // Create ICHashtag (global entity) if needed
+    @try {
+        Class hashtagClass = NSClassFromString(@"ICHashtag");
+        if (hashtagClass) {
+            id account = [note valueForKey:@"account"];
+            SEL hashSel = NSSelectorFromString(@"hashtagWithDisplayText:account:createIfNecessary:");
+            ((id (*)(Class, SEL, id, id, BOOL))objc_msgSend)(
+                hashtagClass, hashSel, bareTag, account, YES);
+        }
+    } @catch (NSException *e) {}
+
+    // Create ICInlineAttachment for the tag
+    NSString *attID = [[NSUUID UUID] UUIDString];
+    @try {
+        Class inlineClass = NSClassFromString(@"ICInlineAttachment");
+        SEL newAttSel = NSSelectorFromString(
+            @"newAttachmentWithIdentifier:typeUTI:altText:tokenContentIdentifier:note:parentAttachment:");
+        ((id (*)(Class, SEL, id, id, id, id, id, id))objc_msgSend)(
+            inlineClass, newAttSel,
+            attID,
+            @"com.apple.notes.inlinetextattachment.hashtag",
+            displayTag,
+            [bareTag uppercaseString],
+            note,
+            nil);
+    } @catch (NSException *e) {
+        fprintf(stderr, "Error creating inline attachment: %s\n", [[e reason] UTF8String]);
+        return 1;
+    }
+
+    // Insert U+FFFC with NSAttachment attribute into mergeableString
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return 1;
+    }
+
+    // Create ICTTAttachment for the attributed string
+    id ttAtt = [[NSClassFromString(@"ICTTAttachment") alloc] init];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        ttAtt, NSSelectorFromString(@"setAttachmentIdentifier:"), attID);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        ttAtt, NSSelectorFromString(@"setAttachmentUTI:"),
+        @"com.apple.notes.inlinetextattachment.hashtag");
+
+    // Build the attributed string: space + U+FFFC (tag marker)
+    unichar fffc = 0xFFFC;
+    NSString *marker = [NSString stringWithFormat:@" %C", fffc];
+    NSAttributedString *tagStr = [[NSAttributedString alloc]
+        initWithString:marker attributes:@{@"NSAttachment": ttAtt}];
+
+    // Get insertion point (end of text)
+    NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"attributedString"));
+    NSUInteger insertPos = [(NSAttributedString *)attrStr length];
+
+    // Insert
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertAttributedString:atIndex:"),
+        tagStr, insertPos);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
     if (!saveContext()) return 1;
-    printf("Added %s to note %lu\n", [normalized UTF8String], (unsigned long)idx);
+    printf("Added %s to note %lu\n", [displayTag UTF8String], (unsigned long)idx);
     return 0;
 }
 
@@ -1221,9 +1320,80 @@ int cmdNotesUntag(NSUInteger idx, NSString *tag, NSString *folder) {
     }
 
     NSString *normalized = [tag hasPrefix:@"#"] ? tag : [@"#" stringByAppendingString:tag];
-    NSString *raw = noteRawText(note);
+    NSString *bareTag = [tag hasPrefix:@"#"] ? [tag substringFromIndex:1] : tag;
+    BOOL removed = NO;
 
-    // Build regex to find all occurrences (with optional leading space)
+    // 1. Try to remove native inline attachment tags
+    @try {
+        NSFetchRequest *req = [NSFetchRequest fetchRequestWithEntityName:@"ICInlineAttachment"];
+        req.predicate = [NSPredicate predicateWithFormat:
+            @"typeUTI == 'com.apple.notes.inlinetextattachment.hashtag' AND note == %@ AND tokenContentIdentifier ==[c] %@",
+            note, [bareTag uppercaseString]];
+        NSArray *atts = [g_moc executeFetchRequest:req error:nil];
+        if (atts.count > 0) {
+            // Collect attachment identifiers to remove from CRDT
+            NSMutableSet *idsToRemove = [NSMutableSet set];
+            for (id att in atts) {
+                NSString *attId = ((id (*)(id, SEL))objc_msgSend)(
+                    att, NSSelectorFromString(@"identifier"));
+                if (attId) [idsToRemove addObject:attId];
+            }
+
+            // Use applyCRDTEdit to remove the U+FFFC markers:
+            // Get raw text, find U+FFFC positions that match our tag attachments,
+            // and remove them along with any leading space
+            id mergeStr = noteMergeableString(note);
+            NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+                mergeStr, NSSelectorFromString(@"attributedString"));
+            NSString *fullText = [(NSAttributedString *)attrStr string];
+            NSUInteger len = fullText.length;
+
+            // Build new text with matching U+FFFC markers removed
+            NSMutableString *newText = [NSMutableString string];
+            NSRange effRange;
+            for (NSUInteger i = 0; i < len; i = NSMaxRange(effRange)) {
+                NSDictionary *attrs = [(NSAttributedString *)attrStr
+                    attributesAtIndex:i effectiveRange:&effRange];
+                id ttAtt = attrs[@"NSAttachment"];
+                BOOL skip = NO;
+                if (ttAtt) {
+                    NSString *attId = ((id (*)(id, SEL))objc_msgSend)(
+                        ttAtt, NSSelectorFromString(@"attachmentIdentifier"));
+                    if ([idsToRemove containsObject:attId]) {
+                        skip = YES;
+                        // Also remove leading space if present
+                        if (newText.length > 0 &&
+                            [newText characterAtIndex:newText.length - 1] == ' ') {
+                            [newText deleteCharactersInRange:
+                                NSMakeRange(newText.length - 1, 1)];
+                        }
+                    }
+                }
+                if (!skip) {
+                    [newText appendString:[fullText substringWithRange:effRange]];
+                }
+            }
+
+            // Apply the edit via CRDT: old text has U+FFFC, new text doesn't
+            NSString *oldRaw = noteRawText(note);
+            if (![newText isEqualToString:fullText]) {
+                applyCRDTEdit(note, oldRaw, newText);
+            }
+
+            // Delete the inline attachment entities
+            for (id att in atts) {
+                [g_moc deleteObject:att];
+            }
+
+            ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+            ((void (*)(id, SEL))objc_msgSend)(note,
+                NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+            removed = YES;
+        }
+    } @catch (NSException *e) {}
+
+    // 2. Also try to remove plain-text tags
+    NSString *raw = noteRawText(note);
     NSString *escapedTag = [NSRegularExpression escapedPatternForString:normalized];
     NSString *pattern = [NSString stringWithFormat:@" ?%@(?=[^A-Za-z0-9_-]|$)", escapedTag];
     NSError *err = nil;
@@ -1231,20 +1401,21 @@ int cmdNotesUntag(NSUInteger idx, NSString *tag, NSString *folder) {
         regularExpressionWithPattern:pattern
         options:NSRegularExpressionCaseInsensitive
         error:&err];
-    if (err) {
-        fprintf(stderr, "Error: Internal regex error\n");
-        return 1;
+    if (!err) {
+        NSString *newText = [re stringByReplacingMatchesInString:raw options:0
+                             range:NSMakeRange(0, raw.length) withTemplate:@""];
+        if (![newText isEqualToString:raw]) {
+            applyCRDTEdit(note, raw, newText);
+            removed = YES;
+        }
     }
 
-    NSString *newText = [re stringByReplacingMatchesInString:raw options:0
-                         range:NSMakeRange(0, raw.length) withTemplate:@""];
-    if ([newText isEqualToString:raw]) {
+    if (!removed) {
         printf("Tag %s not found in note %lu\n", [normalized UTF8String],
                (unsigned long)idx);
         return 0;
     }
 
-    if (!applyCRDTEdit(note, raw, newText)) return 1;
     if (!saveContext()) return 1;
     printf("Removed %s from note %lu\n", [normalized UTF8String],
            (unsigned long)idx);
@@ -1256,9 +1427,7 @@ void cmdNotesTags(BOOL withCounts, BOOL jsonOutput) {
     NSMutableDictionary *tagCounts = [NSMutableDictionary dictionary];
 
     for (id note in notes) {
-        NSString *raw = noteRawText(note);
-        if (!raw) continue;
-        NSArray *tags = extractTags(raw);
+        NSArray *tags = extractAllTags(note);
         NSMutableSet *seen = [NSMutableSet set]; // unique per note
         for (NSString *tag in tags) {
             NSString *lower = [tag lowercaseString];
@@ -2258,6 +2427,107 @@ void cmdNotesBacklinksAll(BOOL jsonOut) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Create Note Link
+// ─────────────────────────────────────────────────────────────────────────────
+
+int cmdNotesLink(NSUInteger idx, NSString *targetTitle, NSString *folder) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found.\n", (unsigned long)idx);
+        return 1;
+    }
+
+    // Find the target note by title
+    NSArray *all = fetchAllNotes();
+    id targetNote = nil;
+    for (id n in all) {
+        NSString *t = noteTitle(n);
+        if ([t caseInsensitiveCompare:targetTitle] == NSOrderedSame) {
+            targetNote = n;
+            break;
+        }
+    }
+    if (!targetNote) {
+        fprintf(stderr, "Error: Target note \"%s\" not found\n", [targetTitle UTF8String]);
+        return 1;
+    }
+    if (targetNote == note) {
+        fprintf(stderr, "Error: Cannot link a note to itself\n");
+        return 1;
+    }
+
+    // Create ICInlineAttachment for the link
+    NSString *attID = [[NSUUID UUID] UUIDString];
+    NSString *targetID = noteIdentifier(targetNote);
+    id account = [note valueForKey:@"account"];
+    NSString *ownerID = @"";
+    @try {
+        ownerID = ((id (*)(id, SEL))objc_msgSend)(account,
+            NSSelectorFromString(@"userRecordName")) ?: @"";
+    } @catch (NSException *e) {}
+    NSString *tokenContent = [NSString stringWithFormat:@"applenotes:note/%@?ownerIdentifier=%@",
+                              [targetID lowercaseString], ownerID];
+    NSString *displayText = noteTitle(targetNote);
+
+    @try {
+        Class inlineClass = NSClassFromString(@"ICInlineAttachment");
+        SEL newAttSel = NSSelectorFromString(
+            @"newAttachmentWithIdentifier:typeUTI:altText:tokenContentIdentifier:note:parentAttachment:");
+        ((id (*)(Class, SEL, id, id, id, id, id, id))objc_msgSend)(
+            inlineClass, newAttSel,
+            attID,
+            @"com.apple.notes.inlinetextattachment.link",
+            displayText,
+            tokenContent,
+            note,
+            nil);
+    } @catch (NSException *e) {
+        fprintf(stderr, "Error creating link attachment: %s\n", [[e reason] UTF8String]);
+        return 1;
+    }
+
+    // Insert U+FFFC with NSAttachment into mergeableString
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return 1;
+    }
+
+    // Create ICTTAttachment for the link
+    id ttAtt = [[NSClassFromString(@"ICTTAttachment") alloc] init];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        ttAtt, NSSelectorFromString(@"setAttachmentIdentifier:"), attID);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        ttAtt, NSSelectorFromString(@"setAttachmentUTI:"),
+        @"com.apple.notes.inlinetextattachment.link");
+
+    // Build: newline + U+FFFC (link marker)
+    unichar fffc = 0xFFFC;
+    NSString *marker = [NSString stringWithFormat:@"\n%C", fffc];
+    NSAttributedString *linkStr = [[NSAttributedString alloc]
+        initWithString:marker attributes:@{@"NSAttachment": ttAtt}];
+
+    // Insert at end
+    NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"attributedString"));
+    NSUInteger insertPos = [(NSAttributedString *)attrStr length];
+
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"insertAttributedString:atIndex:"),
+        linkStr, insertPos);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
+    if (!saveContext()) return 1;
+    printf("Linked note %lu → \"%s\"\n", (unsigned long)idx, [displayText UTF8String]);
+    return 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Watch / Events
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2427,19 +2697,51 @@ void cmdNotesChecklist(NSUInteger idx, NSString *folder, BOOL jsonOut, BOOL summ
         return;
     }
 
-    // Handle --add: append a new checklist item as plain text line
+    // Handle --add: append a native checklist item with paragraph style 103
     if (addText) {
-        NSString *raw = noteRawText(note);
-        NSString *newText;
-        if ([raw hasSuffix:@"\n"]) {
-            newText = [NSString stringWithFormat:@"%@%@\n", raw, addText];
-        } else {
-            newText = [NSString stringWithFormat:@"%@\n%@\n", raw, addText];
-        }
-        if (!applyCRDTEdit(note, raw, newText)) {
-            fprintf(stderr, "Error: Failed to add checklist item\n");
+        id mergeStr = noteMergeableString(note);
+        if (!mergeStr) {
+            fprintf(stderr, "Error: Could not get mergeable string\n");
             return;
         }
+
+        // Create ICTTTodo with NSUUID
+        NSUUID *todoUUID = [NSUUID UUID];
+        id newTodo = ((id (*)(id, SEL, id, NSInteger))objc_msgSend)(
+            [NSClassFromString(@"ICTTTodo") alloc],
+            NSSelectorFromString(@"initWithIdentifier:done:"),
+            todoUUID, (NSInteger)0);
+
+        // Create ICTTParagraphStyle with style=103
+        id paraStyle = [[NSClassFromString(@"ICTTParagraphStyle") alloc] init];
+        ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+            paraStyle, NSSelectorFromString(@"setStyle:"), (NSInteger)103);
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            paraStyle, NSSelectorFromString(@"setTodo:"), newTodo);
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            paraStyle, NSSelectorFromString(@"setUuid:"), [NSUUID UUID]);
+
+        // Build attributed string with TTStyle for the checklist item
+        NSString *itemStr = [NSString stringWithFormat:@"%@\n", addText];
+        NSAttributedString *styledStr = [[NSAttributedString alloc]
+            initWithString:itemStr attributes:@{@"TTStyle": paraStyle}];
+
+        // Get insertion point (end of text)
+        NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"attributedString"));
+        NSUInteger insertPos = [(NSAttributedString *)attrStr length];
+
+        // Insert via mergeableString
+        ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
+        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+            mergeStr, NSSelectorFromString(@"insertAttributedString:atIndex:"),
+            styledStr, insertPos);
+        ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
+        ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+        ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"saveNoteData"));
+        ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+
         if (!saveContext()) return;
         printf("Added checklist item: \"%s\"\n", [addText UTF8String]);
         return;
@@ -2568,11 +2870,16 @@ int cmdNotesCheck(NSUInteger idx, NSUInteger itemNum, NSString *folder) {
     ((void (*)(id, SEL, id))objc_msgSend)(
         newStyle, NSSelectorFromString(@"setTodo:"), newTodo);
 
-    // Apply the new style attribute
+    // Give the new style a UUID
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newStyle, NSSelectorFromString(@"setUuid:"), [NSUUID UUID]);
+
+    // Apply the new style attribute (setAttributes:range: — NOT addAttribute:)
+    NSDictionary *attrDict = @{ @"TTStyle": newStyle };
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
-    ((void (*)(id, SEL, id, id, NSRange))objc_msgSend)(
-        mergeStr, NSSelectorFromString(@"addAttribute:value:range:"),
-        @"TTStyle", newStyle, range);
+    ((void (*)(id, SEL, id, NSRange))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"setAttributes:range:"),
+        attrDict, range);
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
 
@@ -2644,10 +2951,16 @@ int cmdNotesUncheck(NSUInteger idx, NSUInteger itemNum, NSString *folder) {
     ((void (*)(id, SEL, id))objc_msgSend)(
         newStyle, NSSelectorFromString(@"setTodo:"), newTodo);
 
+    // Give the new style a UUID
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        newStyle, NSSelectorFromString(@"setUuid:"), [NSUUID UUID]);
+
+    // Apply the new style attribute (setAttributes:range: — NOT addAttribute:)
+    NSDictionary *uncheckAttrDict = @{ @"TTStyle": newStyle };
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"beginEditing"));
-    ((void (*)(id, SEL, id, id, NSRange))objc_msgSend)(
-        mergeStr, NSSelectorFromString(@"addAttribute:value:range:"),
-        @"TTStyle", newStyle, range);
+    ((void (*)(id, SEL, id, NSRange))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"setAttributes:range:"),
+        uncheckAttrDict, range);
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"endEditing"));
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
 
