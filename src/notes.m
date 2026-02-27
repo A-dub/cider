@@ -2940,3 +2940,143 @@ void cmdNotesTable(NSUInteger idx, NSString *folder, NSUInteger tableIdx,
         printf(" |\n");
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collaborative Sharing
+// ─────────────────────────────────────────────────────────────────────────────
+
+static BOOL noteIsShared(id note) {
+    @try {
+        return ((BOOL (*)(id, SEL))objc_msgSend)(
+            note, NSSelectorFromString(@"isSharedViaICloud"));
+    } @catch (NSException *e) {
+        return NO;
+    }
+}
+
+static NSUInteger noteParticipantCount(id note) {
+    @try {
+        id parts = [note valueForKey:@"participants"];
+        if ([parts isKindOfClass:[NSSet class]]) return [(NSSet *)parts count];
+    } @catch (NSException *e) {}
+    return 0;
+}
+
+void cmdNotesShare(NSUInteger idx, NSString *folder, BOOL jsonOut) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *title = noteTitle(note);
+    BOOL shared = noteIsShared(note);
+    NSUInteger partCount = noteParticipantCount(note);
+
+    if (jsonOut) {
+        printf("{\"title\":\"%s\",\"shared\":%s,\"participants\":%lu",
+               [jsonEscapeString(title) UTF8String],
+               shared ? "true" : "false",
+               (unsigned long)partCount);
+
+        // Include participant IDs
+        if (partCount > 0) {
+            printf(",\"participantDetails\":[");
+            @try {
+                id parts = [note valueForKey:@"participants"];
+                BOOL first = YES;
+                for (id p in (NSSet *)parts) {
+                    NSString *pid = [p valueForKey:@"participantID"];
+                    NSString *uid = [p valueForKey:@"userID"];
+                    BOOL isOwner = [uid isEqualToString:@"__defaultOwner__"];
+                    if (!first) printf(",");
+                    first = NO;
+                    printf("{\"participantID\":\"%s\",\"isOwner\":%s}",
+                           pid ? [jsonEscapeString(pid) UTF8String] : "",
+                           isOwner ? "true" : "false");
+                }
+            } @catch (NSException *e) {}
+            printf("]");
+        }
+        printf("}\n");
+        return;
+    }
+
+    printf("Share status for \"%s\":\n\n", [title UTF8String]);
+    printf("  Shared: %s\n", shared ? "Yes (via iCloud)" : "No");
+
+    if (partCount > 0) {
+        printf("  Participants: %lu\n", (unsigned long)partCount);
+        @try {
+            id parts = [note valueForKey:@"participants"];
+            int i = 1;
+            for (id p in (NSSet *)parts) {
+                NSString *uid = [p valueForKey:@"userID"];
+                BOOL isOwner = [uid isEqualToString:@"__defaultOwner__"];
+                printf("    %d. %s%s\n", i,
+                       isOwner ? "You (owner)" : [uid UTF8String],
+                       isOwner ? "" : "");
+                i++;
+            }
+        } @catch (NSException *e) {}
+    } else if (shared) {
+        printf("  Participants: (details not available)\n");
+    }
+
+    if (!shared) {
+        printf("\n  Note is not currently shared.\n");
+        printf("  To share, use the Share button in Apple Notes.\n");
+    }
+}
+
+void cmdNotesShared(BOOL jsonOut) {
+    NSArray *all = fetchAllNotes();
+    NSMutableArray *sharedNotes = [NSMutableArray array];
+
+    for (id note in all) {
+        if (noteIsShared(note)) {
+            [sharedNotes addObject:note];
+        }
+    }
+
+    if (jsonOut) {
+        printf("[");
+        for (NSUInteger i = 0; i < sharedNotes.count; i++) {
+            id note = sharedNotes[i];
+            NSString *t = jsonEscapeString(noteTitle(note));
+            NSString *f = jsonEscapeString(folderName(note));
+            NSUInteger parts = noteParticipantCount(note);
+            printf("%s{\"title\":\"%s\",\"folder\":\"%s\",\"participants\":%lu}",
+                   i > 0 ? "," : "",
+                   [t UTF8String], [f UTF8String], (unsigned long)parts);
+        }
+        printf("]\n");
+        return;
+    }
+
+    if (sharedNotes.count == 0) {
+        printf("No shared notes found.\n");
+        return;
+    }
+
+    printf("Shared notes:\n\n");
+    printf("  # %-42s %-22s %s\n", "Title", "Folder", "Participants");
+    printf("--- %-42s %-22s %s\n",
+           "------------------------------------------",
+           "----------------------",
+           "------------");
+
+    NSUInteger i = 1;
+    for (id note in sharedNotes) {
+        NSString *t = truncStr(noteTitle(note), 42);
+        NSString *f = truncStr(folderName(note), 22);
+        NSUInteger parts = noteParticipantCount(note);
+        printf("%3lu %-42s %-22s %lu\n",
+               (unsigned long)i,
+               [padRight(t, 42) UTF8String],
+               [padRight(f, 22) UTF8String],
+               (unsigned long)parts);
+        i++;
+    }
+    printf("\nTotal: %lu shared note(s)\n", (unsigned long)sharedNotes.count);
+}

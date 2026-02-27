@@ -1,6 +1,6 @@
-# Cider v3.14.0 — Test Report
+# Cider v3.15.0 — Test Report
 
-> Generated: 2026-02-26 18:52:09
+> Generated: 2026-02-26 18:59:18
 >
 > This report shows **before and after** state for every cider operation,
 > demonstrating how each command works with real Apple Notes data.
@@ -15,14 +15,14 @@
 
 ```
 $ ./cider --version
-cider v3.14.0
+cider v3.15.0
 ```
 
 ### Test 02: Help (top-level)
 
 ```
 $ ./cider --help
-cider v3.14.0 — Apple Notes CLI with CRDT attachment support
+cider v3.15.0 — Apple Notes CLI with CRDT attachment support
 
 USAGE:
   cider notes [subcommand]   Notes operations
@@ -47,6 +47,8 @@ NOTES SUBCOMMANDS:
   tag <N> <tag>                       Add #tag to note N
   untag <N> <tag>                     Remove #tag from note N
   tags [--count] [--json]             List all unique tags
+  share <N> [--json]                 Show sharing status for note N
+  shared [--json]                    List all shared notes
   table <N> [options]                Show table data (aligned, CSV, JSON)
   checklist <N> [--summary] [--json] Show checklist items with status
   check <N> <item#>                 Check off checklist item
@@ -136,7 +138,7 @@ Shows the full search/replace documentation with all flags and examples.
 
 ```
 $ ./cider notes --help
-cider notes v3.14.0 — Apple Notes CLI
+cider notes v3.15.0 — Apple Notes CLI
 
 USAGE:
   cider notes                              List all notes
@@ -187,6 +189,21 @@ TEMPLATES:
     cider templates show "Meeting Notes"  View template content
     cider notes add --template "Meeting Notes"  Create note from template
     cider notes add --template "TODO" -f Work   Template + target folder
+
+SHARING:
+  cider notes share <N>                     Show sharing status for note N
+  cider notes share <N> --json              JSON share status
+  cider notes shared                        List all shared notes
+  cider notes shared --json                 JSON list of shared notes
+
+  Shows iCloud collaboration status and participant count.
+  Share URLs are not programmatically accessible; use Apple Notes
+  Share button to create/manage collaboration links.
+
+  Examples:
+    cider notes share 5                     Show share status for note 5
+    cider notes shared                      List all shared notes
+    cider notes shared --json               JSON output for piping
 
 TABLES:
   cider notes table <N>                     Show first table (aligned columns)
@@ -459,15 +476,15 @@ Total: 16 note(s)
 ```
 $ ./cider notes list -f Cider Tests --json
 [
-  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
+  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
   {"index":10,"title":"Live Refresh Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:24:58Z","modified":"2026-02-19T11:24:58Z"},
   {"index":11,"title":"AS Created Note","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:21:34Z","modified":"2026-02-19T11:21:34Z"},
   {"index":12,"title":"Serialize Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T10:58:40Z","modified":"2026-02-19T10:58:40Z"},
@@ -614,7 +631,7 @@ Found 1 note(s) matching "pineapple":
 ```
 $ ./cider notes search CiderTest Alpha --json
 [
-  {"index":1,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"}
+  {"index":1,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"}
 ]
 ```
 
@@ -1453,15 +1470,15 @@ Total: 16 note(s)
 ```
 $ ./cider notes list --json -f Cider Tests
 [
-  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
-  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:52:09Z","modified":"2026-02-26T23:52:09Z"},
+  {"index":1,"title":"CiderTest CaseTest","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":2,"title":"CiderTest ReplAll2","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":3,"title":"CiderTest ReplAll1","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":4,"title":"CiderTest Regex","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":5,"title":"CiderTest Attach","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":6,"title":"CiderTest Delta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":7,"title":"CiderTest Gamma","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":8,"title":"CiderTest Beta","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
+  {"index":9,"title":"CiderTest Alpha","folder":"Cider Tests","attachments":0,"created":"2026-02-26T23:59:18Z","modified":"2026-02-26T23:59:18Z"},
   {"index":10,"title":"Live Refresh Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:24:58Z","modified":"2026-02-19T11:24:58Z"},
   {"index":11,"title":"AS Created Note","folder":"Cider Tests","attachments":0,"created":"2026-02-19T11:21:34Z","modified":"2026-02-19T11:21:34Z"},
   {"index":12,"title":"Serialize Test","folder":"Cider Tests","attachments":0,"created":"2026-02-19T10:58:40Z","modified":"2026-02-19T10:58:40Z"},
@@ -1716,19 +1733,19 @@ Note link graph (3 notes with links):
   "Tickets":
     → "Valentine’s Day" (as "Valentine’s Day")
   "Valentine’s Day":
-    → "Aryn present ideas" (as "Aryn present ideas")
-    → "Tickets" (as "Tickets")
-    → "Reservations" (as "Reservations")
     → "Flowers" (as "Flowers")
     → "Aryn vday gift 2026" (as "Aryn vday gift 2026")
     → "Agenda vday 2026" (as "Agenda vday 2026")
+    → "Aryn present ideas" (as "Aryn present ideas")
+    → "Tickets" (as "Tickets")
+    → "Reservations" (as "Reservations")
 ```
 
 ### Test 68: Full link graph (JSON)
 
 ```
 $ ./cider notes backlinks --all --json
-{"Flowers":{"title":"Flowers","links":[{"displayText":"Valentine’s Day","targetTitle":"Valentine’s Day"}]},"Tickets":{"title":"Tickets","links":[{"displayText":"Valentine’s Day","targetTitle":"Valentine’s Day"}]},"Valentine’s Day":{"title":"Valentine’s Day","links":[{"displayText":"Reservations","targetTitle":"Reservations"},{"displayText":"Aryn vday gift 2026","targetTitle":"Aryn vday gift 2026"},{"displayText":"Agenda vday 2026","targetTitle":"Agenda vday 2026"},{"displayText":"Flowers","targetTitle":"Flowers"},{"displayText":"Aryn present ideas","targetTitle":"Aryn present ideas"},{"displayText":"Tickets","targetTitle":"Tickets"}]}}
+{"Flowers":{"title":"Flowers","links":[{"displayText":"Valentine’s Day","targetTitle":"Valentine’s Day"}]},"Tickets":{"title":"Tickets","links":[{"displayText":"Valentine’s Day","targetTitle":"Valentine’s Day"}]},"Valentine’s Day":{"title":"Valentine’s Day","links":[{"displayText":"Reservations","targetTitle":"Reservations"},{"displayText":"Flowers","targetTitle":"Flowers"},{"displayText":"Aryn vday gift 2026","targetTitle":"Aryn vday gift 2026"},{"displayText":"Agenda vday 2026","targetTitle":"Agenda vday 2026"},{"displayText":"Aryn present ideas","targetTitle":"Aryn present ideas"},{"displayText":"Tickets","targetTitle":"Tickets"}]}}
 ```
 
 ---
@@ -1745,7 +1762,7 @@ $ cider notes watch --interval 1 &
 Created note: "CiderTest WatchNote"
 Watching for note changes (interval: 1s, Ctrl-C to stop)
 
-[2026-02-26 18:52:20] created: "CiderTest WatchNote"
+[2026-02-26 18:59:29] created: "CiderTest WatchNote"
 ```
 Delete note "CiderTest WatchNote"? (y/N) Deleted: "CiderTest WatchNote"
 
@@ -1861,31 +1878,206 @@ No tables in "CiderTest Alpha".
 
 ---
 
-## Section 13: Folder Management
+## Section 13: Sharing
 
 
-### Test 84: Create a folder
+### Test 84: Share status on unshared note
+
+```
+$ ./cider notes share 9
+Share status for "CiderTest Alpha":
+
+  Shared: No
+
+  Note is not currently shared.
+  To share, use the Share button in Apple Notes.
+```
+
+### Test 85: Share status --json
+
+```
+$ ./cider notes share 9 --json
+{"title":"CiderTest Alpha","shared":false,"participants":0}
+```
+
+### Test 86: List shared notes
+
+```
+$ ./cider notes shared
+Shared notes:
+
+  # Title                                      Folder                 Participants
+--- ------------------------------------------ ---------------------- ------------
+  1 Arts typical schedule                      Notes                  2
+  2 TO DO HOUSE                                Notes                  2
+  3 Grocery                                    Groceries              2
+  4 Returns                                    Notes                  2
+  5 Bonus Performance                          Notes                  2
+  6 Aryn present ideas                         Notes                  2
+  7 GROCERY                                    Notes                  2
+  8 2026 Annual Planning                       Notes                  2
+  9 2025 tax docs                              Notes                  1
+ 10 SATURDAY                                   Notes                  2
+ 11 Sleep                                      Notes                  1
+ 12 baby names                                 Notes                  2
+ 13 Salads                                     Notes                  1
+ 14 CHRISTMAS SCHEDULE                         Notes                  2
+ 15 Christmas list                             Notes                  2
+ 16 Islamorada Recs                            Notes                  6
+ 17 Milk Schedule                              Notes                  2
+ 18 Notes for Arthur                           Notes                  2
+ 19 THIS WEEK                                  Notes                  2
+ 20 Florida Keys Babymoon                      Notes                  2
+ 21 bananas                                    Notes                  3
+ 22 Pork Butt Recipe-Electric Smoker           Notes                  4
+ 23 Flight Cheat Sheet                         Notes                  2
+ 24 Lactation bites                            Notes                  2
+ 25 Milestone photos                           Notes                  2
+ 26 Starting with the first few days and end.. Notes                  2
+ 27 Photos                                     Notes                  2
+ 28 To Do for photos                           Notes                  2
+ 29 Vanilla extract                            Notes                  2
+ 30 TO DO                                      Notes                  2
+ 31 Baby Williams Updates                      Notes                  12
+ 32 Don’t forget                               Notes                  2
+ 33 HOSPITAL BAG                               Notes                  2
+ 34 DR                                         Notes                  2
+ 35 Pediatrician Options                       Notes                  2
+ 36 Car Insurance cards                        Notes                  1
+ 37 House B4 BB                                Notes                  2
+ 38 Italian Chopped Salad                      Notes                  2
+ 39 TO DO                                      Notes                  2
+ 40 TO DO                                      Notes                  2
+ 41 BABY SHOWER RSVPS                          Notes                  2
+ 42 TODAY                                      Notes                  2
+ 43 To do                                      Notes                  2
+ 44 House projects 2025                        Notes                  2
+ 45 ARYN'S BLOOD SUGAR                         Notes                  2
+ 46 Diabetes Specialist                        Notes                  2
+ 47 Backyard                                   Notes                  2
+ 48 BANK                                       Notes                  2
+ 49 Sex                                        Notes                  2
+ 50 Budget Planning-New                        Notes                  1
+ 51 12 march                                   Notes                  1
+ 52 TO DO                                      Notes                  2
+ 53 Credit Cards                               Notes                  2
+ 54 WEDNESDAY                                  Notes                  2
+ 55 Cholesterol Foods                          Notes                  2
+ 56 Todo b4 18th                               Notes                  2
+ 57 16 Jan todo                                Notes                  2
+ 58 Todo                                       Notes                  2
+ 59 Unfinished house items                     Notes                  2
+ 60 Home front door codes                      Notes                  2
+ 61 Switch plates                              Notes                  1
+ 62 Xmas list                                  Notes                  2
+ 63 Christmas list                             Notes                  2
+ 64 Compose                                    Notes                  2
+ 65 Strasbourg                                 Archive                2
+ 66 BEFORE TRIP TO DO                          Archive                2
+ 67 SEPTEMBER - FRANCE                         Notes                  2
+ 68 HOME                                       Notes                  2
+ 69 Questions for doctor                       Notes                  2
+ 70 CHS Wed                                    Notes                  1
+ 71 Basement doors                             Notes                  1
+ 72 ARYNS BIRTHDAY LIST                        Notes                  3
+ 73 Basement schedule                          Notes                  2
+ 74 Xmas                                       Notes                  1
+ 75 Chat                                       Notes                  2
+ 76 Fulfords- Chrome cast                      Notes                  1
+ 77 Out of town guests                         Wedding                2
+ 78 Wedding                                    Notes                  2
+ 79 This week                                  Notes                  2
+ 80 Free weekends 2023                         Notes                  1
+ 81 Honeymoon                                  Notes                  1
+ 82 Schedule planning                          Notes                  1
+ 83 Addison’s weekend plan                     TYPED BY CAL           2
+ 84 26Mar                                      TODO                   1
+ 85 ARYN'S AUSTIN TRIP                         Notes                  2
+ 86 TO DO                                      Notes                  2
+ 87 VDAY                                       Notes                  2
+ 88 WEDDING                                    Notes                  2
+ 89 H O M E                                    Notes                  2
+ 90 Kitchen open points                        Notes                  2
+ 91 ITALY TRIP                                 Notes                  2
+ 92 Italy recommendations                      Notes                  5
+ 93 LOWES                                      Notes                  2
+ 94 NYC                                        Notes                  2
+ 95 New York trip                              Notes                  2
+ 96 OUTSIDE                                    Notes                  2
+ 97 HONEY DO LIST                              Notes                  2
+ 98 Thing to be done                           Notes                  2
+ 99 t h a n k  u’s:                            Notes                  2
+100 Moving shit for floors                     Notes                  1
+101 GROCERY                                    Notes                  2
+102 FLOORING                                   Notes                  2
+103 C H R I S T M A S  L I S T                 Gifts                  2
+104 t💕h💕a💕n💕k💕💕u💕                       Relationship           1
+105 116 W 49th                                 Home                   2
+106 This Week                                  TODO                   1
+107 ~9:30 - Addison gets call from Sean Marl.. Work                   1
+108 Paris                                      Places                 1
+109 Ad wishlist                                Hobbies                2
+
+Total: 109 shared note(s)
+```
+
+### Test 87: List shared notes --json (first 3)
+
+```
+[
+  {
+    "title": "Arts typical schedule",
+    "folder": "Notes",
+    "participants": 2
+  },
+  {
+    "title": "TO DO HOUSE",
+    "folder": "Notes",
+    "participants": 2
+  },
+  {
+    "title": "Grocery",
+    "folder": "Groceries",
+    "participants": 2
+  }
+]
+
+```
+
+### Test 89: Share status on nonexistent note
+
+```
+$ ./cider notes share 99999
+Error: Note 99999 not found
+```
+
+---
+
+## Section 14: Folder Management
+
+
+### Test 90: Create a folder
 
 ```
 $ ./cider notes folder create CiderTest Subfolder
 Created folder: "CiderTest Subfolder"
 ```
 
-### Test 85: Create duplicate folder
+### Test 91: Create duplicate folder
 
 ```
 $ ./cider notes folder create CiderTest Subfolder
 Folder "CiderTest Subfolder" already exists.
 ```
 
-### Test 86: Rename folder
+### Test 92: Rename folder
 
 ```
 $ ./cider notes folder rename CiderTest Subfolder CiderTest Renamed
 Renamed folder: "CiderTest Subfolder" → "CiderTest Renamed"
 ```
 
-### Test 87: List folders (shows renamed)
+### Test 93: List folders (shows renamed)
 
 ```
 $ ./cider notes folders
@@ -1919,21 +2111,21 @@ Folders:
 Total: 25 folder(s)
 ```
 
-### Test 88: Delete empty folder
+### Test 94: Delete empty folder
 
 ```
 $ ./cider notes folder delete CiderTest Renamed
 Deleted folder: "CiderTest Renamed"
 ```
 
-### Test 89: Delete non-empty folder (error)
+### Test 95: Delete non-empty folder (error)
 
 ```
 $ ./cider notes folder delete Cider Tests
 Error: Folder "Cider Tests" has 11 note(s). Move or delete them first.
 ```
 
-### Test 90: Delete nonexistent folder (error)
+### Test 96: Delete nonexistent folder (error)
 
 ```
 $ ./cider notes folder delete NonexistentFolder99
@@ -1942,17 +2134,17 @@ Error: Folder "NonexistentFolder99" not found
 
 ---
 
-## Section 14: Tags
+## Section 15: Tags
 
 
-### Test 91: Add a tag
+### Test 97: Add a tag
 
 ```
 $ ./cider notes tag 9 project-x
 Added #project-x to note 9
 ```
 
-### Test 92: Show note with tag
+### Test 98: Show note with tag
 
 ```
 $ ./cider notes show 9
@@ -1966,21 +2158,21 @@ This is the alpha note with some searchable content.
 This line was appended. (suffix) #project-x
 ```
 
-### Test 93: Duplicate tag detection
+### Test 99: Duplicate tag detection
 
 ```
 $ ./cider notes tag 9 project-x
 Note 9 already has tag #project-x
 ```
 
-### Test 94: Add second tag
+### Test 100: Add second tag
 
 ```
 $ ./cider notes tag 9 important
 Added #important to note 9
 ```
 
-### Test 95: List all tags
+### Test 101: List all tags
 
 ```
 $ ./cider notes tags
@@ -2013,7 +2205,7 @@ $ ./cider notes tags
 Total: 25 unique tag(s)
 ```
 
-### Test 96: Tags with counts
+### Test 102: Tags with counts
 
 ```
 $ ./cider notes tags --count
@@ -2046,7 +2238,7 @@ $ ./cider notes tags --count
 Total: 25 unique tag(s)
 ```
 
-### Test 97: Tags JSON output
+### Test 103: Tags JSON output
 
 ```
 $ ./cider notes tags --json
@@ -2079,7 +2271,7 @@ $ ./cider notes tags --json
 ]
 ```
 
-### Test 98: Filter notes by tag
+### Test 104: Filter notes by tag
 
 ```
 $ ./cider notes list --tag project-x
@@ -2090,7 +2282,7 @@ $ ./cider notes list --tag project-x
 Total: 1 note(s)
 ```
 
-### Test 99: Remove a tag
+### Test 105: Remove a tag
 
 ```
 $ ./cider notes untag 9 project-x
@@ -2110,7 +2302,7 @@ This is the alpha note with some searchable content.
 This line was appended. (suffix) #important
 ```
 
-### Test 100: Remove nonexistent tag
+### Test 106: Remove nonexistent tag
 
 ```
 $ ./cider notes untag 9 nonexistent
@@ -2120,24 +2312,24 @@ Removed #important from note 9
 
 ---
 
-## Section 15: Pin / Unpin
+## Section 16: Pin / Unpin
 
 
-### Test 101: Pin a note
+### Test 107: Pin a note
 
 ```
 $ ./cider notes pin 9
 📌 Pinned note 9: "CiderTest Alpha"
 ```
 
-### Test 102: Pin already-pinned note
+### Test 108: Pin already-pinned note
 
 ```
 $ ./cider notes pin 9
 Note 9 is already pinned.
 ```
 
-### Test 103: List pinned notes
+### Test 109: List pinned notes
 
 ```
 $ ./cider notes list --pinned
@@ -2148,14 +2340,14 @@ $ ./cider notes list --pinned
 Total: 1 note(s)
 ```
 
-### Test 104: Unpin a note
+### Test 110: Unpin a note
 
 ```
 $ ./cider notes unpin 9
 📌 Unpinned note 9: "CiderTest Alpha"
 ```
 
-### Test 105: Unpin non-pinned note
+### Test 111: Unpin non-pinned note
 
 ```
 $ ./cider notes unpin 9
@@ -2164,10 +2356,10 @@ Note 9 is not pinned.
 
 ---
 
-## Section 16: Edit (CRDT)
+## Section 17: Edit (CRDT)
 
 
-### Test 106: Edit via stdin pipe
+### Test 112: Edit via stdin pipe
 
 
 **BEFORE**
@@ -2204,7 +2396,7 @@ CiderTest Gamma
 Gamma note fully rewritten via stdin pipe.
 ```
 
-### Test 107: Add note via stdin pipe
+### Test 113: Add note via stdin pipe
 
 
 **BEFORE**
@@ -2235,10 +2427,10 @@ Found 1 note(s) matching "CiderTest Piped":
 
 ---
 
-## Section 17: Attachments
+## Section 18: Attachments
 
 
-### Test 108: Attach file to note
+### Test 114: Attach file to note
 
 
 **BEFORE: Attachments**
@@ -2252,7 +2444,7 @@ No attachments in "CiderTest Attach"
 
 ```
 $ ./cider notes attach 6 /tmp/cider_report_attach.txt
-✓ Attachment inserted at position 73 in "CiderTest Attach" (id: B1B21067-54D6-4B51-8964-3EA9B4ED065F)
+✓ Attachment inserted at position 73 in "CiderTest Attach" (id: 7D838CE7-C05A-48B2-9702-76FC50D2125D)
 ```
 
 **AFTER: Attachments**
@@ -2263,14 +2455,14 @@ Attachments in "CiderTest Attach":
   1. [public.plain-text]  (public.plain-text, position 73)
 ```
 
-### Test 109: List attachments (JSON)
+### Test 115: List attachments (JSON)
 
 ```
 $ ./cider notes attachments 6 --json
-[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":73,"id":"B1B21067-54D6-4B51-8964-3EA9B4ED065F"}]
+[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":73,"id":"7D838CE7-C05A-48B2-9702-76FC50D2125D"}]
 ```
 
-### Test 110: Detach attachment
+### Test 116: Detach attachment
 
 
 **BEFORE**
@@ -2295,21 +2487,21 @@ $ ./cider notes attachments 6
 No attachments in "CiderTest Attach"
 ```
 
-### Test 111: Attach at specific CRDT position
+### Test 117: Attach at specific CRDT position
 
 
 **COMMAND**
 
 ```
 $ ./cider notes attach 6 /tmp/cider_report_pos.txt --at 5
-✓ Attachment inserted at position 5 in "CiderTest Attach" (id: 5EF5D28D-7D9A-4947-8567-872A1EFCC30C)
+✓ Attachment inserted at position 5 in "CiderTest Attach" (id: C383B68B-DBC4-4011-8013-5F3F4E9052A5)
 ```
 
 **AFTER (JSON — note position field)**
 
 ```
 $ ./cider notes attachments 6 --json
-[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":5,"id":"5EF5D28D-7D9A-4947-8567-872A1EFCC30C"}]
+[{"index":1,"name":"[public.plain-text]","type":"public.plain-text","position":5,"id":"C383B68B-DBC4-4011-8013-5F3F4E9052A5"}]
 ```
 
 Cleanup:
@@ -2321,10 +2513,10 @@ $ ./cider notes detach 6 1
 
 ---
 
-## Section 18: Move
+## Section 19: Move
 
 
-### Test 112: Move note to different folder
+### Test 118: Move note to different folder
 
 
 **BEFORE**
@@ -2355,10 +2547,10 @@ Moved "CiderTest Beta" → "Cider Tests"
 
 ---
 
-## Section 19: Delete
+## Section 20: Delete
 
 
-### Test 113: Delete note
+### Test 119: Delete note
 
 
 **BEFORE**
@@ -2388,15 +2580,15 @@ No notes found matching "CiderTest Delta"
 
 ---
 
-## Section 20: Export
+## Section 21: Export
 
 
-### Test 114: Export all notes to HTML
+### Test 120: Export all notes to HTML
 
 ```
-$ ./cider notes export /tmp/cider_report_export_35557
-Exported 578 notes to: /tmp/cider_report_export_35557
-Index:    /tmp/cider_report_export_35557/index.html
+$ ./cider notes export /tmp/cider_report_export_38881
+Exported 578 notes to: /tmp/cider_report_export_38881
+Index:    /tmp/cider_report_export_38881/index.html
 ```
 
 Files created:
@@ -2404,47 +2596,47 @@ Files created:
 ```
 579 HTML files exported
 Sample files:
-/tmp/cider_report_export_35557/0001_CiderTest Beta.html
-/tmp/cider_report_export_35557/0002_CiderTest Piped.html
-/tmp/cider_report_export_35557/0003_CiderTest CaseTest.html
-/tmp/cider_report_export_35557/0004_CiderTest ReplAll2.html
-/tmp/cider_report_export_35557/0005_CiderTest ReplAll1.html
+/tmp/cider_report_export_38881/0001_CiderTest Beta.html
+/tmp/cider_report_export_38881/0002_CiderTest Piped.html
+/tmp/cider_report_export_38881/0003_CiderTest CaseTest.html
+/tmp/cider_report_export_38881/0004_CiderTest ReplAll2.html
+/tmp/cider_report_export_38881/0005_CiderTest ReplAll1.html
 ```
 
 ---
 
-## Section 21: Error Handling
+## Section 22: Error Handling
 
 
-### Test 115: Show nonexistent note
+### Test 121: Show nonexistent note
 
 ```
 $ ./cider notes show 99999
 Error: Note 99999 not found
 ```
 
-### Test 116: Replace in nonexistent note
+### Test 122: Replace in nonexistent note
 
 ```
 $ ./cider notes replace 99999 --find x --replace y
 Error: Note 99999 not found
 ```
 
-### Test 117: Detach from nonexistent note
+### Test 123: Detach from nonexistent note
 
 ```
 $ ./cider notes detach 99999 1
 Error: Note 99999 not found
 ```
 
-### Test 118: Attach nonexistent file
+### Test 124: Attach nonexistent file
 
 ```
 $ ./cider notes attach 9 /nonexistent/file.txt
 Error: File not found: /nonexistent/file.txt
 ```
 
-### Test 119: Unknown command
+### Test 125: Unknown command
 
 ```
 $ ./cider bogus
@@ -2452,12 +2644,12 @@ Unknown command: bogus
 Run 'cider --help' for usage.
 ```
 
-### Test 120: Unknown notes subcommand
+### Test 126: Unknown notes subcommand
 
 ```
 $ ./cider notes bogus
 Unknown notes subcommand: bogus
-cider notes v3.14.0 — Apple Notes CLI
+cider notes v3.15.0 — Apple Notes CLI
 
 USAGE:
   cider notes                              List all notes
@@ -2508,6 +2700,21 @@ TEMPLATES:
     cider templates show "Meeting Notes"  View template content
     cider notes add --template "Meeting Notes"  Create note from template
     cider notes add --template "TODO" -f Work   Template + target folder
+
+SHARING:
+  cider notes share <N>                     Show sharing status for note N
+  cider notes share <N> --json              JSON share status
+  cider notes shared                        List all shared notes
+  cider notes shared --json                 JSON list of shared notes
+
+  Shows iCloud collaboration status and participant count.
+  Share URLs are not programmatically accessible; use Apple Notes
+  Share button to create/manage collaboration links.
+
+  Examples:
+    cider notes share 5                     Show share status for note 5
+    cider notes shared                      List all shared notes
+    cider notes shared --json               JSON output for piping
 
 TABLES:
   cider notes table <N>                     Show first table (aligned columns)
@@ -2715,7 +2922,7 @@ Interactive mode: if <N> is omitted from edit/delete/move/show/replace/attach,
 you'll be prompted to enter it (when stdin is a terminal).
 ```
 
-### Test 121: Missing replace arguments
+### Test 127: Missing replace arguments
 
 ```
 $ ./cider notes replace 1 --find x
@@ -2724,10 +2931,10 @@ Usage: cider notes replace <N> --find <text> --replace <text> [--regex] [-i]
 
 ---
 
-## Section 22: Backward Compatibility
+## Section 23: Backward Compatibility
 
 
-### Test 122: Legacy `-fl` (folders)
+### Test 128: Legacy `-fl` (folders)
 
 ```
 $ ./cider notes -fl
@@ -2760,7 +2967,7 @@ Folders:
 Total: 24 folder(s)
 ```
 
-### Test 123: Legacy `-v` (view)
+### Test 129: Legacy `-v` (view)
 
 ```
 $ ./cider notes -v 9
@@ -2774,7 +2981,7 @@ This is the alpha note with some searchable content.
 This line was appended. (suffix)
 ```
 
-### Test 124: Legacy `-s` (search)
+### Test 130: Legacy `-s` (search)
 
 ```
 $ ./cider notes -s CiderTest Beta
@@ -2785,7 +2992,7 @@ Found 1 note(s) matching "CiderTest Beta":
   1 CiderTest Beta                             Cider Tests           
 ```
 
-### Test 125: Legacy `-f` (folder filter)
+### Test 131: Legacy `-f` (folder filter)
 
 ```
 $ ./cider notes -f Cider Tests
@@ -2822,4 +3029,4 @@ Delete note "CiderTest Piped"? (y/N) Deleted: "CiderTest Piped"
 
 ---
 
-*Report complete — 125 test cases demonstrated. All test notes cleaned up.*
+*Report complete — 131 test cases demonstrated. All test notes cleaned up.*

@@ -38,6 +38,8 @@ void printHelp(void) {
 "  tag <N> <tag>                       Add #tag to note N\n"
 "  untag <N> <tag>                     Remove #tag from note N\n"
 "  tags [--count] [--json]             List all unique tags\n"
+"  share <N> [--json]                 Show sharing status for note N\n"
+"  shared [--json]                    List all shared notes\n"
 "  table <N> [options]                Show table data (aligned, CSV, JSON)\n"
 "  checklist <N> [--summary] [--json] Show checklist items with status\n"
 "  check <N> <item#>                 Check off checklist item\n"
@@ -175,6 +177,21 @@ void printNotesHelp(void) {
 "    cider templates show \"Meeting Notes\"  View template content\n"
 "    cider notes add --template \"Meeting Notes\"  Create note from template\n"
 "    cider notes add --template \"TODO\" -f Work   Template + target folder\n"
+"\n"
+"SHARING:\n"
+"  cider notes share <N>                     Show sharing status for note N\n"
+"  cider notes share <N> --json              JSON share status\n"
+"  cider notes shared                        List all shared notes\n"
+"  cider notes shared --json                 JSON list of shared notes\n"
+"\n"
+"  Shows iCloud collaboration status and participant count.\n"
+"  Share URLs are not programmatically accessible; use Apple Notes\n"
+"  Share button to create/manage collaboration links.\n"
+"\n"
+"  Examples:\n"
+"    cider notes share 5                     Show share status for note 5\n"
+"    cider notes shared                      List all shared notes\n"
+"    cider notes shared --json               JSON output for piping\n"
 "\n"
 "TABLES:\n"
 "  cider notes table <N>                     Show first table (aligned columns)\n"
@@ -729,6 +746,24 @@ int main(int argc, char *argv[]) {
                     if (!idx) return 1;
                     cmdNotesBacklinks(idx, folder, jsonOut);
                 }
+
+            // ── cider notes share ──
+            } else if ([sub isEqualToString:@"share"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                if (!idx) idx = promptNoteIndex(@"show share status for", folder);
+                if (!idx) return 1;
+                cmdNotesShare(idx, folder, jsonOut);
+
+            // ── cider notes shared ──
+            } else if ([sub isEqualToString:@"shared"]) {
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                cmdNotesShared(jsonOut);
 
             // ── cider notes table ──
             } else if ([sub isEqualToString:@"table"]) {

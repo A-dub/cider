@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.14.0"
+#define VERSION "3.15.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +154,8 @@ int  cmdNotesUncheck(NSUInteger idx, NSUInteger itemNum, NSString *folder);
 void cmdNotesTable(NSUInteger idx, NSString *folder, NSUInteger tableIdx,
                    BOOL jsonOut, BOOL csvOut, BOOL listTables, BOOL headersOnly,
                    NSInteger rowNum);
+void cmdNotesShare(NSUInteger idx, NSString *folder, BOOL jsonOut);
+void cmdNotesShared(BOOL jsonOut);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reminders commands (reminders.m)

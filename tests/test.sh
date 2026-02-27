@@ -1081,6 +1081,40 @@ assert_contains "reset" "settings reset: success message"
 run "$CIDER" settings
 assert_contains "No settings" "settings reset: settings cleared"
 
+# ── Test: sharing ──────────────────────────────────────────────────────
+
+log "Testing: sharing"
+
+# Share status on a test note (not shared)
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "share" "Could not find CiderTest Alpha"
+else
+    run "$CIDER" notes share "$IDX"
+    assert_rc 0 "share: exits 0 on unshared note"
+    assert_contains "not currently shared" "share: shows not shared message"
+
+    # Share --json
+    run "$CIDER" notes share "$IDX" --json
+    assert_rc 0 "share --json: exits 0"
+    assert_contains '"shared":false' "share --json: shared is false"
+    assert_contains '"participants"' "share --json: has participants field"
+fi
+
+# Share on nonexistent note
+run "$CIDER" notes share 99999
+assert_rc 0 "share: nonexistent note exits 0"
+assert_contains "not found" "share: error message for nonexistent"
+
+# List shared notes
+run "$CIDER" notes shared
+assert_rc 0 "shared: exits 0"
+
+# List shared notes --json
+run "$CIDER" notes shared --json
+assert_rc 0 "shared --json: exits 0"
+assert_matches '^\[' "shared --json: starts with array bracket"
+
 # ── Test: pin / unpin ───────────────────────────────────────────────────────
 
 log "Testing: pin / unpin"
