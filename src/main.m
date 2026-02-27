@@ -202,10 +202,12 @@ void printNotesHelp(void) {
 "  cider notes table <N> --csv               Table as CSV\n"
 "  cider notes table <N> --row 2             Specific row (0-based)\n"
 "  cider notes table <N> --headers           Column headers only\n"
+"  cider notes table <N> --add-row \"a|b|c\"  Add row (creates table if none)\n"
 "\n"
-"  Reads native Apple Notes tables (com.apple.notes.table attachments).\n"
+"  Native Apple Notes tables (com.apple.notes.table attachments).\n"
 "  Uses ICAttachmentTableModel and ICTable to access row/column data.\n"
 "  Row 0 is treated as the header row for JSON key names.\n"
+"  --add-row can be repeated to add multiple rows at once.\n"
 "\n"
 "  Examples:\n"
 "    cider notes table 5                     Show first table, aligned\n"
@@ -214,6 +216,8 @@ void printNotesHelp(void) {
 "    cider notes table 5 --csv               CSV output\n"
 "    cider notes table 5 --row 0             First row (headers)\n"
 "    cider notes table 5 --index 1 --csv     Second table as CSV\n"
+"    cider notes table 5 --add-row \"Name|Value\"  Create table with header row\n"
+"    cider notes table 5 --add-row \"Row1|Data\"   Add data row\n"
 "    cider notes table 5 --headers           Column headers only\n"
 "\n"
 "CHECKLISTS:\n"
@@ -816,6 +820,18 @@ int main(int argc, char *argv[]) {
                 NSInteger rowNum = -1;
                 NSString *rowStr = argValue(argc, argv, 3, "--row", NULL);
                 if (rowStr) rowNum = [rowStr integerValue];
+
+                // Collect --add-row arguments (can be repeated)
+                NSMutableArray *addRows = [NSMutableArray array];
+                for (int i = 3; i < argc; i++) {
+                    if (strcmp(argv[i], "--add-row") == 0 && i + 1 < argc) {
+                        [addRows addObject:[NSString stringWithUTF8String:argv[++i]]];
+                    }
+                }
+                if (addRows.count > 0) {
+                    return cmdNotesTableAdd(idx, folder, addRows);
+                }
+
                 cmdNotesTable(idx, folder, tableIdx, jsonOut, csvOut, listTables, headersOnly, rowNum);
 
             // ── cider notes checklist ──

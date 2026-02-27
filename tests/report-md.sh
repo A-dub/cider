@@ -647,6 +647,28 @@ IDX=$(find_note "CiderTest Alpha")
 cmd "$CIDER" notes table "$IDX" --headers
 
 
+header "Create table with --add-row"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes table "$IDX" --add-row "Name|Age|City" --add-row "Alice|30|NYC" --add-row "Bob|25|LA"
+sleep 1
+
+header "View created table"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes table "$IDX"
+
+header "Created table --json"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes table "$IDX" --json
+
+header "Created table --csv"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes table "$IDX" --csv
+
+header "Created table --headers"
+IDX=$(find_note "CiderTest Alpha")
+cmd "$CIDER" notes table "$IDX" --headers
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 printf "\n---\n\n## Section 13: Sharing\n\n"
 # ─────────────────────────────────────────────────────────────────────────────

@@ -3255,6 +3255,215 @@ void cmdNotesTable(NSUInteger idx, NSString *folder, NSUInteger tableIdx,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Table creation
+// ─────────────────────────────────────────────────────────────────────────────
+
+int cmdNotesTableAdd(NSUInteger idx, NSString *folder, NSArray *rows) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+    if (rows.count == 0) {
+        fprintf(stderr, "Error: No rows provided\n");
+        return 1;
+    }
+
+    // Parse rows into arrays of cells (pipe-separated)
+    NSMutableArray *parsedRows = [NSMutableArray array];
+    NSUInteger colCount = 0;
+    for (NSString *row in rows) {
+        NSArray *cells = [row componentsSeparatedByString:@"|"];
+        [parsedRows addObject:cells];
+        if (cells.count > colCount) colCount = cells.count;
+    }
+
+    // Check if note already has a table — if so, add rows to it
+    NSArray *existingTables = tableAttachmentsForNote(note);
+    if (existingTables.count > 0) {
+        // Add rows to the first existing table
+        id att = existingTables[0];
+        id tableModel = ((id (*)(id, SEL))objc_msgSend)(att,
+            NSSelectorFromString(@"tableModel"));
+        id table = ((id (*)(id, SEL))objc_msgSend)(tableModel,
+            NSSelectorFromString(@"table"));
+        NSUInteger existingRows = ((NSUInteger (*)(id, SEL))objc_msgSend)(table,
+            NSSelectorFromString(@"rowCount"));
+        NSUInteger existingCols = ((NSUInteger (*)(id, SEL))objc_msgSend)(table,
+            NSSelectorFromString(@"columnCount"));
+
+        // Add extra columns if needed
+        for (NSUInteger c = existingCols; c < colCount; c++) {
+            ((id (*)(id, SEL, NSUInteger))objc_msgSend)(table,
+                NSSelectorFromString(@"insertColumnAtIndex:"), c);
+        }
+        if (colCount < existingCols) colCount = existingCols;
+
+        // Add and populate new rows
+        for (NSUInteger r = 0; r < parsedRows.count; r++) {
+            NSUInteger newRowIdx = existingRows + r;
+            ((id (*)(id, SEL, NSUInteger))objc_msgSend)(table,
+                NSSelectorFromString(@"insertRowAtIndex:"), newRowIdx);
+            NSArray *cells = parsedRows[r];
+            for (NSUInteger c = 0; c < colCount && c < cells.count; c++) {
+                NSString *val = [cells[c] stringByTrimmingCharactersInSet:
+                    [NSCharacterSet whitespaceCharacterSet]];
+                NSAttributedString *cellStr = [[NSAttributedString alloc]
+                    initWithString:val];
+                ((void (*)(id, SEL, id, NSUInteger, NSUInteger))objc_msgSend)(table,
+                    NSSelectorFromString(@"setAttributedString:columnIndex:rowIndex:"),
+                    cellStr, c, newRowIdx);
+            }
+        }
+
+        // Persist
+        ((void (*)(id, SEL))objc_msgSend)(tableModel,
+            NSSelectorFromString(@"writeMergeableData"));
+        ((void (*)(id, SEL))objc_msgSend)(tableModel,
+            NSSelectorFromString(@"persistPendingChanges"));
+        ((void (*)(id, SEL))objc_msgSend)(note,
+            NSSelectorFromString(@"saveNoteData"));
+        ((void (*)(id, SEL))objc_msgSend)(note,
+            NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+        if (!saveContext()) return 1;
+
+        printf("Added %lu row(s) to existing table in note %lu\n",
+               (unsigned long)parsedRows.count, (unsigned long)idx);
+        return 0;
+    }
+
+    // Create new table attachment
+    id tableAtt = ((id (*)(id, SEL))objc_msgSend)(note,
+        NSSelectorFromString(@"addTableAttachment"));
+    if (!tableAtt) {
+        fprintf(stderr, "Error: Failed to create table attachment\n");
+        return 1;
+    }
+
+    NSString *tableId = ((id (*)(id, SEL))objc_msgSend)(tableAtt,
+        NSSelectorFromString(@"identifier"));
+    id tableModel = ((id (*)(id, SEL))objc_msgSend)(tableAtt,
+        NSSelectorFromString(@"tableModel"));
+    id table = ((id (*)(id, SEL))objc_msgSend)(tableModel,
+        NSSelectorFromString(@"table"));
+
+    // Default is 2x2, resize to match our data
+    NSUInteger targetRows = parsedRows.count;
+    NSUInteger targetCols = colCount;
+
+    // Add rows beyond the default 2
+    for (NSUInteger r = 2; r < targetRows; r++) {
+        ((id (*)(id, SEL, NSUInteger))objc_msgSend)(table,
+            NSSelectorFromString(@"insertRowAtIndex:"), r);
+    }
+    // Remove extra rows if we need fewer than 2
+    if (targetRows < 2) {
+        for (NSUInteger r = 2; r > targetRows; r--) {
+            ((void (*)(id, SEL, NSUInteger))objc_msgSend)(table,
+                NSSelectorFromString(@"removeRowAtIndex:"), r - 1);
+        }
+    }
+    // Add columns beyond the default 2
+    for (NSUInteger c = 2; c < targetCols; c++) {
+        ((id (*)(id, SEL, NSUInteger))objc_msgSend)(table,
+            NSSelectorFromString(@"insertColumnAtIndex:"), c);
+    }
+    // Remove extra columns if we need fewer than 2
+    if (targetCols < 2) {
+        for (NSUInteger c = 2; c > targetCols; c--) {
+            ((void (*)(id, SEL, NSUInteger))objc_msgSend)(table,
+                NSSelectorFromString(@"removeColumnAtIndex:"), c - 1);
+        }
+    }
+
+    // Populate cells
+    for (NSUInteger r = 0; r < targetRows; r++) {
+        NSArray *cells = parsedRows[r];
+        for (NSUInteger c = 0; c < targetCols && c < cells.count; c++) {
+            NSString *val = [cells[c] stringByTrimmingCharactersInSet:
+                [NSCharacterSet whitespaceCharacterSet]];
+            NSAttributedString *cellStr = [[NSAttributedString alloc]
+                initWithString:val];
+            ((void (*)(id, SEL, id, NSUInteger, NSUInteger))objc_msgSend)(table,
+                NSSelectorFromString(@"setAttributedString:columnIndex:rowIndex:"),
+                cellStr, c, r);
+        }
+    }
+
+    // Persist table CRDT data
+    ((void (*)(id, SEL))objc_msgSend)(tableModel,
+        NSSelectorFromString(@"writeMergeableData"));
+    ((void (*)(id, SEL))objc_msgSend)(tableModel,
+        NSSelectorFromString(@"persistPendingChanges"));
+
+    // Insert U+FFFC into the mergeableString with table attachment attributes
+    id mergeStr = noteMergeableString(note);
+    if (!mergeStr) {
+        fprintf(stderr, "Error: Could not get mergeable string\n");
+        return 1;
+    }
+
+    // Create ICTTAttachment for the FFFC
+    id ttAtt = [[NSClassFromString(@"ICTTAttachment") alloc] init];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        ttAtt, NSSelectorFromString(@"setAttachmentIdentifier:"), tableId);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        ttAtt, NSSelectorFromString(@"setAttachmentUTI:"),
+        @"com.apple.notes.table");
+
+    // Paragraph style for table: style=3 (body)
+    id paraStyle = [[NSClassFromString(@"ICTTParagraphStyle") alloc] init];
+    ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+        paraStyle, NSSelectorFromString(@"setStyle:"), (NSInteger)3);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        paraStyle, NSSelectorFromString(@"setUuid:"), [NSUUID UUID]);
+
+    // Build: newline + U+FFFC + newline
+    unichar fffc = 0xFFFC;
+    NSString *fffcStr = [NSString stringWithFormat:@"%C", fffc];
+    NSAttributedString *tableMarker = [[NSAttributedString alloc]
+        initWithString:fffcStr
+        attributes:@{@"NSAttachment": ttAtt, @"TTStyle": paraStyle}];
+
+    // Get insertion point (end of text)
+    NSAttributedString *attrStr = ((id (*)(id, SEL))objc_msgSend)(
+        mergeStr, NSSelectorFromString(@"attributedString"));
+    NSUInteger insertPos = [(NSAttributedString *)attrStr length];
+
+    // Insert newline + table marker + newline
+    NSAttributedString *nlStr = [[NSAttributedString alloc]
+        initWithString:@"\n"];
+
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr,
+        NSSelectorFromString(@"beginEditing"));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(mergeStr,
+        NSSelectorFromString(@"insertAttributedString:atIndex:"),
+        nlStr, insertPos);
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(mergeStr,
+        NSSelectorFromString(@"insertAttributedString:atIndex:"),
+        tableMarker, insertPos + 1);
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(mergeStr,
+        NSSelectorFromString(@"insertAttributedString:atIndex:"),
+        nlStr, insertPos + 2);
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr,
+        NSSelectorFromString(@"endEditing"));
+    ((void (*)(id, SEL))objc_msgSend)(mergeStr,
+        NSSelectorFromString(@"generateIdsForLocalChanges"));
+
+    // Save
+    ((void (*)(id, SEL))objc_msgSend)(note,
+        NSSelectorFromString(@"saveNoteData"));
+    ((void (*)(id, SEL))objc_msgSend)(note,
+        NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+    if (!saveContext()) return 1;
+
+    printf("Created %lux%lu table in note %lu\n",
+           (unsigned long)targetRows, (unsigned long)targetCols,
+           (unsigned long)idx);
+    return 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Collaborative Sharing
 // ─────────────────────────────────────────────────────────────────────────────
 

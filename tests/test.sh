@@ -981,6 +981,43 @@ if [ -n "$IDX" ]; then
     assert_contains "No tables" "table --headers: shows no tables on empty"
 fi
 
+# Table creation via --add-row
+IDX=$(find_note "CiderTest Alpha")
+if [ -n "$IDX" ]; then
+    # Add a table with header + 2 rows
+    run "$CIDER" notes table "$IDX" --add-row "Name|Age|City" --add-row "Alice|30|NYC" --add-row "Bob|25|LA"
+    assert_rc 0 "table --add-row: creates table successfully"
+
+    sleep 1
+
+    # Verify table exists now
+    run "$CIDER" notes table "$IDX"
+    assert_rc 0 "table: shows created table"
+    assert_contains "Alice" "table: contains row data"
+
+    # Verify --list shows table
+    run "$CIDER" notes table "$IDX" --list
+    assert_contains "Table" "table --list: lists created table"
+
+    # Verify --json output
+    run "$CIDER" notes table "$IDX" --json
+    assert_rc 0 "table --json: outputs created table"
+    assert_contains "Alice" "table --json: contains row data in json"
+
+    # Verify --csv output
+    run "$CIDER" notes table "$IDX" --csv
+    assert_rc 0 "table --csv: outputs created table"
+    assert_contains "Alice" "table --csv: contains row data in csv"
+
+    # Verify --headers
+    run "$CIDER" notes table "$IDX" --headers
+    assert_contains "Name" "table --headers: shows header from created table"
+fi
+
+# Table --add-row on nonexistent note
+run "$CIDER" notes table 99999 --add-row "a|b|c"
+assert_rc 1 "table --add-row: nonexistent note returns exit 1"
+
 # ── Test: checklists ───────────────────────────────────────────────────
 
 log "Testing: checklists"
