@@ -124,7 +124,7 @@ void cmdNotesList(NSString *folder, BOOL jsonOutput,
             NSDate *modified = [note valueForKey:@"modificationDate"];
             printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\","
                    "\"attachments\":%lu,\"created\":\"%s\",\"modified\":\"%s\"}%s\n",
-                   (unsigned long)(i + 1),
+                   (unsigned long)noteIntPK(note),
                    [t UTF8String],
                    [f UTF8String],
                    (unsigned long)ac,
@@ -136,9 +136,9 @@ void cmdNotesList(NSString *folder, BOOL jsonOutput,
         return;
     }
 
-    printf("  # %-42s %-22s %s\n",
-           "Title", "Folder", "Attachments");
-    printf("--- %-42s %-22s %s\n",
+    printf("%6s %-42s %-22s %s\n",
+           "#", "Title", "Folder", "Attachments");
+    printf("------ %-42s %-22s %s\n",
            "------------------------------------------",
            "----------------------",
            "-----------");
@@ -152,19 +152,17 @@ void cmdNotesList(NSString *folder, BOOL jsonOutput,
         return;
     }
 
-    NSUInteger i = 1;
     for (id note in notes) {
         NSString *t = truncStr(noteTitle(note), 42);
         NSString *f = truncStr(folderName(note), 22);
         NSUInteger ac = noteAttachmentCount(note);
         NSString *atts = ac > 0 ? [NSString stringWithFormat:@"📎 %lu", ac] : @"";
 
-        printf("%3lu %-42s %-22s %s\n",
-               (unsigned long)i,
+        printf("%6lu %-42s %-22s %s\n",
+               (unsigned long)noteIntPK(note),
                [padRight(t, 42) UTF8String],
                [padRight(f, 22) UTF8String],
                [atts UTF8String]);
-        i++;
     }
     printf("\nTotal: %lu note(s)\n", (unsigned long)notes.count);
 }
@@ -994,7 +992,7 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
             NSDate *modified = [note valueForKey:@"modificationDate"];
             printf("  {\"index\":%lu,\"title\":\"%s\",\"folder\":\"%s\","
                    "\"attachments\":%lu,\"created\":\"%s\",\"modified\":\"%s\"}%s\n",
-                   (unsigned long)(i + 1),
+                   (unsigned long)noteIntPK(note),
                    [t UTF8String],
                    [f UTF8String],
                    (unsigned long)ac,
@@ -1008,20 +1006,18 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
 
     printf("Found %lu note(s) matching \"%s\":\n\n",
            (unsigned long)results.count, [query UTF8String]);
-    printf("  # %-42s %-22s\n", "Title", "Folder");
-    printf("--- %-42s %-22s\n",
+    printf("%6s %-42s %-22s\n", "#", "Title", "Folder");
+    printf("------ %-42s %-22s\n",
            "------------------------------------------",
            "----------------------");
 
-    NSUInteger i = 1;
     for (id note in results) {
         NSString *t = truncStr(noteTitle(note), 42);
         NSString *f = truncStr(folderName(note), 22);
-        printf("%3lu %-42s %-22s\n",
-               (unsigned long)i,
+        printf("%6lu %-42s %-22s\n",
+               (unsigned long)noteIntPK(note),
                [padRight(t, 42) UTF8String],
                [padRight(f, 22) UTF8String]);
-        i++;
     }
 }
 
@@ -1469,6 +1465,61 @@ void cmdNotesTags(BOOL withCounts, BOOL jsonOutput) {
         }
     }
     printf("\nTotal: %lu unique tag(s)\n", (unsigned long)sortedTags.count);
+}
+
+int cmdTagsClean(void) {
+    // Find all ICHashtag entities
+    NSFetchRequest *hashReq = [NSFetchRequest fetchRequestWithEntityName:@"ICHashtag"];
+    NSArray *allHashtags = [g_moc executeFetchRequest:hashReq error:nil];
+    if (!allHashtags || allHashtags.count == 0) {
+        printf("No hashtag entities found.\n");
+        return 0;
+    }
+
+    // Build set of tags that are actually used in notes (via ICInlineAttachment)
+    NSFetchRequest *attReq = [NSFetchRequest fetchRequestWithEntityName:@"ICInlineAttachment"];
+    attReq.predicate = [NSPredicate predicateWithFormat:
+        @"typeUTI == 'com.apple.notes.inlinetextattachment.hashtag' AND note != nil AND note.markedForDeletion != YES"];
+    NSArray *liveAtts = [g_moc executeFetchRequest:attReq error:nil];
+
+    NSMutableSet *liveTags = [NSMutableSet set];
+    for (id att in liveAtts) {
+        NSString *token = ((id (*)(id, SEL))objc_msgSend)(
+            att, NSSelectorFromString(@"tokenContentIdentifier"));
+        if (token) [liveTags addObject:[token uppercaseString]];
+    }
+
+    // Delete ICHashtag entities whose tag isn't referenced by any live note
+    NSUInteger cleaned = 0;
+    for (id hashtag in allHashtags) {
+        NSString *name = ((id (*)(id, SEL))objc_msgSend)(
+            hashtag, NSSelectorFromString(@"displayText"));
+        NSString *upper = [name uppercaseString];
+        if (![liveTags containsObject:upper]) {
+            printf("  Removing orphaned tag: #%s\n", [name UTF8String]);
+            [g_moc deleteObject:hashtag];
+            cleaned++;
+        }
+    }
+
+    // Also delete orphaned ICInlineAttachment hashtag entities (note is nil or deleted)
+    NSFetchRequest *orphanReq = [NSFetchRequest fetchRequestWithEntityName:@"ICInlineAttachment"];
+    orphanReq.predicate = [NSPredicate predicateWithFormat:
+        @"typeUTI == 'com.apple.notes.inlinetextattachment.hashtag' AND (note == nil OR note.markedForDeletion == YES)"];
+    NSArray *orphanAtts = [g_moc executeFetchRequest:orphanReq error:nil];
+    for (id att in orphanAtts) {
+        [g_moc deleteObject:att];
+        cleaned++;
+    }
+
+    if (cleaned == 0) {
+        printf("No orphaned tags found.\n");
+        return 0;
+    }
+
+    if (!saveContext()) return 1;
+    printf("Cleaned %lu orphaned tag(s).\n", (unsigned long)cleaned);
+    return 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

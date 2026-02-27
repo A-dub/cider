@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define VERSION "3.17.0"
+#define VERSION "3.18.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,6 +128,7 @@ NSArray *extractTags(NSString *text);
 int  cmdNotesTag(NSUInteger idx, NSString *tag, NSString *folder);
 int  cmdNotesUntag(NSUInteger idx, NSString *tag, NSString *folder);
 void cmdNotesTags(BOOL withCounts, BOOL jsonOutput);
+int  cmdTagsClean(void);
 int  cmdFolderCreate(NSString *name, NSString *parent);
 int  cmdFolderDelete(NSString *name);
 int  cmdFolderRename(NSString *oldName, NSString *newName);

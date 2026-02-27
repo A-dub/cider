@@ -987,6 +987,8 @@ int main(int argc, char *argv[]) {
             } else if ([sub isEqualToString:@"tags"]) {
                 BOOL withCounts = argHasFlag(argc, argv, 3, "--count", NULL);
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                BOOL clean = argHasFlag(argc, argv, 3, "--clean", NULL);
+                if (clean) return cmdTagsClean();
                 cmdNotesTags(withCounts, jsonOut);
 
             // ── cider notes replace ──

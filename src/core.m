@@ -441,8 +441,10 @@ NSArray *filteredNotes(NSString *filterFolder) {
 
 id noteAtIndex(NSUInteger idx, NSString *folder) {
     NSArray *notes = filteredNotes(folder);
-    if (idx == 0 || idx > notes.count) return nil;
-    return notes[idx - 1];
+    for (id note in notes) {
+        if ((NSUInteger)noteIntPK(note) == idx) return note;
+    }
+    return nil;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
