@@ -19,8 +19,9 @@
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <notify.h>
 
-#define VERSION "3.18.0"
+#define VERSION "4.0.0"
 #define ATTACHMENT_MARKER ((unichar)0xFFFC)
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +105,7 @@ void cmdNotesList(NSString *folder, BOOL jsonOutput,
                   BOOL pinnedOnly, NSString *tagFilter);
 void cmdFoldersList(BOOL jsonOutput);
 int  cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput);
+int  cmdNotesInspect(NSUInteger idx, NSString *folder, BOOL jsonOutput);
 void cmdNotesAdd(NSString *folderName);
 void cmdNotesEdit(NSUInteger idx);
 int  cmdNotesReplace(NSUInteger idx, NSString *findStr, NSString *replaceStr,
@@ -118,6 +120,9 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
 int  cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 int  cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 void cmdNotesDebug(NSUInteger idx, NSString *folder);
+void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw);
+int  cmdNotesGetdate(NSUInteger idx, NSString *folder, BOOL jsonOutput);
+int  cmdNotesSetdate(NSUInteger idx, NSString *dateStr, NSString *folder, BOOL dryRun);
 void cmdSettings(BOOL jsonOutput);
 int  cmdSettingsGet(NSString *key);
 int  cmdSettingsSet(NSString *key, NSString *value);

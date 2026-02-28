@@ -51,6 +51,12 @@ BOOL initNotesContext(void) {
         return NO;
     }
 
+    // Set up cross-process change coordinator for CloudKit sync notifications
+    @try {
+        ((void (*)(id, SEL))objc_msgSend)(
+            g_ctx, NSSelectorFromString(@"setupCrossProcessChangeCoordinator"));
+    } @catch (NSException *e) {}
+
     // Verify we can actually read from the store (detect Full Disk Access issues)
     NSFetchRequest *testReq = [NSFetchRequest fetchRequestWithEntityName:@"ICNote"];
     testReq.fetchLimit = 1;
@@ -342,16 +348,33 @@ NSString *editableToRawText(NSString *edited) {
 }
 
 BOOL saveContext(void) {
-    NSError *err = nil;
-    BOOL ok = ((BOOL (*)(id, SEL, NSError **))objc_msgSend)(
-        g_ctx, NSSelectorFromString(@"save:"), &err);
-    if (!ok && !err) {
-        ok = ((BOOL (*)(id, SEL))objc_msgSend)(
-            g_ctx, NSSelectorFromString(@"save"));
+    // Use saveImmediately — the no-arg save on ICNoteContext preserves CloudKit
+    // dirty flags (needsToBePushedToCloud), while save: can clear them.
+    BOOL ok = ((BOOL (*)(id, SEL))objc_msgSend)(
+        g_ctx, NSSelectorFromString(@"saveImmediately"));
+    if (!ok) {
+        // Fallback to save: with error reporting
+        NSError *err = nil;
+        ok = ((BOOL (*)(id, SEL, NSError **))objc_msgSend)(
+            g_ctx, NSSelectorFromString(@"save:"), &err);
+        if (err) {
+            fprintf(stderr, "Save error: %s\n",
+                    [[err localizedDescription] UTF8String]);
+        }
     }
-    if (err) {
-        fprintf(stderr, "Save error: %s\n",
-                [[err localizedDescription] UTF8String]);
+
+    // Notify Notes.app of external database change so it syncs to CloudKit
+    if (ok) {
+        // Post via Darwin notification (cross-process)
+        notify_post("ICEditorExtensionDidSaveNotification");
+        // Also post via the coordinator as backup
+        id coord = ((id (*)(id, SEL))objc_msgSend)(
+            g_ctx, NSSelectorFromString(@"crossProcessChangeCoordinator"));
+        if (coord) {
+            ((void (*)(id, SEL))objc_msgSend)(
+                coord,
+                NSSelectorFromString(@"postEditorExtensionDidSaveNotification"));
+        }
     }
     return ok;
 }

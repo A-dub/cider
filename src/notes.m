@@ -7,6 +7,12 @@
 // Forward declarations for static helpers
 static NSArray *extractAllTags(id note);
 static BOOL noteHasTag(id note, NSString *tag);
+static NSArray *outgoingLinks(id note);
+static NSArray *collectChecklistItems(id note);
+static NSArray *tableAttachmentsForNote(id note);
+static BOOL noteIsShared(id note);
+static NSUInteger noteParticipantCount(id note);
+static NSString *uuidFromTokenContentIdentifier(NSString *tci);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Interactive prompt helper
@@ -253,6 +259,481 @@ int cmdNotesView(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
     printf("\n╚══════════════════════════════════════════╝\n\n");
 
     printf("%s\n", [body UTF8String]);
+    return 0;
+}
+
+int cmdNotesInspect(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *title = noteTitle(note);
+    NSString *fName = folderName(note);
+    NSInteger pk = noteIntPK(note);
+    NSString *uri = noteURIString(note);
+    NSString *identifier = noteIdentifier(note);
+    NSDate *created = [note valueForKey:@"creationDate"];
+    NSDate *modified = [note valueForKey:@"modificationDate"];
+    NSString *raw = noteRawText(note);
+    NSString *body = noteTextForDisplay(note);
+    NSUInteger charCount = raw ? raw.length : 0;
+    NSUInteger wordCount = 0;
+    if (raw && raw.length > 0) {
+        NSArray *words = [raw componentsSeparatedByCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        for (NSString *w in words) {
+            if (w.length > 0) wordCount++;
+        }
+    }
+    BOOL isPinned = ((BOOL (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"isPinned"));
+    BOOL isShared = noteIsShared(note);
+    NSUInteger partCount = noteParticipantCount(note);
+
+    // Attachments
+    NSArray *orderedIDs = attachmentOrderFromCRDT(note);
+    NSArray *atts = attachmentsAsArray(noteVisibleAttachments(note));
+    NSUInteger attCount = orderedIDs ? orderedIDs.count : 0;
+    // Tags
+    NSArray *tags = extractAllTags(note);
+
+    // Links
+    NSArray *links = outgoingLinks(note);
+
+    // Backlinks
+    NSString *myIdentifier = noteIdentifier(note);
+    NSArray *allNotes = fetchAllNotes();
+    NSMutableArray *backlinks = [NSMutableArray array];
+    for (id other in allNotes) {
+        if (other == note) continue;
+        @try {
+            SEL sel = NSSelectorFromString(@"allNoteTextInlineAttachments");
+            if (![other respondsToSelector:sel]) continue;
+            id inlineAtts = ((id (*)(id, SEL))objc_msgSend)(other, sel);
+            for (id att in inlineAtts) {
+                BOOL isLink = (BOOL)((NSInteger (*)(id, SEL))objc_msgSend)(
+                    att, NSSelectorFromString(@"isLinkAttachment"));
+                if (!isLink) continue;
+                NSString *tci = ((id (*)(id, SEL))objc_msgSend)(
+                    att, NSSelectorFromString(@"tokenContentIdentifier"));
+                if (!tci) continue;
+                NSRange noteRange = [tci rangeOfString:@"applenotes:note/"];
+                if (noteRange.location == NSNotFound) continue;
+                NSString *rest = [tci substringFromIndex:noteRange.location + 16];
+                NSRange qRange = [rest rangeOfString:@"?"];
+                NSString *targetUUID = qRange.location != NSNotFound
+                    ? [rest substringToIndex:qRange.location] : rest;
+                if ([targetUUID caseInsensitiveCompare:myIdentifier] == NSOrderedSame) {
+                    [backlinks addObject:@{
+                        @"title": noteTitle(other),
+                        @"pk": @(noteIntPK(other))
+                    }];
+                    break;
+                }
+            }
+        } @catch (NSException *e) {}
+    }
+
+    // Checklist items
+    NSArray *checkItems = collectChecklistItems(note);
+    int checkDone = 0;
+    for (NSDictionary *item in checkItems) {
+        if ([item[@"done"] boolValue]) checkDone++;
+    }
+
+    // Tables
+    NSArray *tableAtts = tableAttachmentsForNote(note);
+
+    if (jsonOutput) {
+        printf("{\n");
+        printf("  \"id\": %ld,\n", (long)pk);
+        printf("  \"title\": \"%s\",\n", [jsonEscapeString(title) UTF8String]);
+        printf("  \"folder\": \"%s\",\n", [jsonEscapeString(fName) UTF8String]);
+        printf("  \"identifier\": \"%s\",\n", [jsonEscapeString(identifier ?: @"") UTF8String]);
+        printf("  \"uri\": \"%s\",\n", [jsonEscapeString(uri) UTF8String]);
+        printf("  \"created\": \"%s\",\n", [isoDateString(created) UTF8String]);
+        printf("  \"modified\": \"%s\",\n", [isoDateString(modified) UTF8String]);
+        printf("  \"characters\": %lu,\n", (unsigned long)charCount);
+        printf("  \"words\": %lu,\n", (unsigned long)wordCount);
+        printf("  \"pinned\": %s,\n", isPinned ? "true" : "false");
+        printf("  \"shared\": %s,\n", isShared ? "true" : "false");
+        printf("  \"participants\": %lu,\n", (unsigned long)partCount);
+
+        // Tags
+        printf("  \"tags\": [");
+        for (NSUInteger i = 0; i < tags.count; i++) {
+            printf("%s\"%s\"", i > 0 ? ", " : "", [jsonEscapeString(tags[i]) UTF8String]);
+        }
+        printf("],\n");
+
+        // Attachments
+        printf("  \"attachments\": [");
+        for (NSUInteger i = 0; i < attCount; i++) {
+            id val = orderedIDs[i];
+            NSString *attID = (val != [NSNull null]) ? val : nil;
+            NSString *name = attID ? attachmentNameByID(atts, attID) : @"attachment";
+            NSString *uti = @"unknown";
+            if (attID) {
+                for (id a in atts) {
+                    NSString *ident = ((id (*)(id, SEL))objc_msgSend)(
+                        a, NSSelectorFromString(@"identifier"));
+                    if ([ident isEqualToString:attID]) {
+                        id u = [a valueForKey:@"typeUTI"];
+                        if (u) uti = u;
+                        break;
+                    }
+                }
+            }
+            printf("%s{\"name\":\"%s\",\"type\":\"%s\",\"id\":\"%s\"}",
+                   i > 0 ? ", " : "",
+                   [jsonEscapeString(name) UTF8String],
+                   [jsonEscapeString(uti) UTF8String],
+                   attID ? [jsonEscapeString(attID) UTF8String] : "");
+        }
+        printf("],\n");
+
+        // Links
+        printf("  \"links\": [");
+        for (NSUInteger i = 0; i < links.count; i++) {
+            NSDictionary *l = links[i];
+            printf("%s{\"text\":\"%s\",\"target\":\"%s\"}",
+                   i > 0 ? ", " : "",
+                   [jsonEscapeString(l[@"displayText"]) UTF8String],
+                   [jsonEscapeString(l[@"targetTitle"] ?: @"") UTF8String]);
+        }
+        printf("],\n");
+
+        // Backlinks
+        printf("  \"backlinks\": [");
+        for (NSUInteger i = 0; i < backlinks.count; i++) {
+            NSDictionary *bl = backlinks[i];
+            printf("%s{\"title\":\"%s\",\"id\":%ld}",
+                   i > 0 ? ", " : "",
+                   [jsonEscapeString(bl[@"title"]) UTF8String],
+                   (long)[bl[@"pk"] integerValue]);
+        }
+        printf("],\n");
+
+        // Checklist
+        printf("  \"checklist\": {\"total\":%lu,\"checked\":%d,\"items\":[",
+               (unsigned long)checkItems.count, checkDone);
+        for (NSUInteger i = 0; i < checkItems.count; i++) {
+            NSDictionary *item = checkItems[i];
+            printf("%s{\"text\":\"%s\",\"done\":%s}",
+                   i > 0 ? ", " : "",
+                   [jsonEscapeString(item[@"text"]) UTF8String],
+                   [item[@"done"] boolValue] ? "true" : "false");
+        }
+        printf("]},\n");
+
+        // Tables
+        printf("  \"tables\": [");
+        for (NSUInteger i = 0; i < tableAtts.count; i++) {
+            id tAtt = tableAtts[i];
+            id tm = ((id (*)(id, SEL))objc_msgSend)(tAtt, NSSelectorFromString(@"tableModel"));
+            id tbl = ((id (*)(id, SEL))objc_msgSend)(tm, NSSelectorFromString(@"table"));
+            NSUInteger rows = ((NSUInteger (*)(id, SEL))objc_msgSend)(tbl, NSSelectorFromString(@"rowCount"));
+            NSUInteger cols = ((NSUInteger (*)(id, SEL))objc_msgSend)(tbl, NSSelectorFromString(@"columnCount"));
+            printf("%s{\"rows\":%lu,\"columns\":%lu,\"data\":[",
+                   i > 0 ? ", " : "", (unsigned long)rows, (unsigned long)cols);
+            for (NSUInteger r = 0; r < rows; r++) {
+                @try {
+                    NSArray *strings = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                        tm, NSSelectorFromString(@"stringsAtRow:"), r);
+                    printf("%s[", r > 0 ? ", " : "");
+                    NSUInteger sc = strings ? strings.count : 0;
+                    for (NSUInteger c = 0; c < cols; c++) {
+                        NSString *cell = (c < sc) ? strings[c] : @"";
+                        printf("%s\"%s\"", c > 0 ? ", " : "", [jsonEscapeString(cell) UTF8String]);
+                    }
+                    printf("]");
+                } @catch (NSException *e) {}
+            }
+            printf("]}");
+        }
+        printf("],\n");
+
+        // Body
+        printf("  \"body\": \"%s\"\n", [jsonEscapeString(body) UTF8String]);
+        printf("}\n");
+        return 0;
+    }
+
+    // ── Text output (document order) ──
+
+    printf("╔══════════════════════════════════════════════════════════════╗\n");
+    printf("  %s\n", [title UTF8String]);
+    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
+
+    // Metadata
+    printf("── Metadata ──────────────────────────────────────────────────\n");
+    printf("  ID:           %ld\n", (long)pk);
+    printf("  Folder:       %s\n", [fName UTF8String]);
+    printf("  Created:      %s\n", [isoDateString(created) UTF8String]);
+    printf("  Modified:     %s\n", [isoDateString(modified) UTF8String]);
+    printf("  Characters:   %lu\n", (unsigned long)charCount);
+    printf("  Words:        %lu\n", (unsigned long)wordCount);
+    printf("  Pinned:       %s\n", isPinned ? "Yes" : "No");
+    printf("  Shared:       %s\n", isShared ? "Yes" : "No");
+    if (partCount > 0)
+        printf("  Participants: %lu\n", (unsigned long)partCount);
+    if (tags.count > 0)
+        printf("  Tags:         %lu\n", (unsigned long)tags.count);
+    if (attCount > 0)
+        printf("  Attachments:  %lu\n", (unsigned long)attCount);
+    if (links.count > 0)
+        printf("  Links:        %lu\n", (unsigned long)links.count);
+    if (backlinks.count > 0)
+        printf("  Backlinks:    %lu\n", (unsigned long)backlinks.count);
+    if (checkItems.count > 0)
+        printf("  Checklist:    %d/%lu\n", checkDone, (unsigned long)checkItems.count);
+    if (tableAtts.count > 0)
+        printf("  Tables:       %lu\n", (unsigned long)tableAtts.count);
+    printf("  Identifier:   %s\n", [identifier UTF8String]);
+    printf("  URI:          %s\n", [uri UTF8String]);
+
+    // Backlinks (external references, not part of note content)
+    if (backlinks.count > 0) {
+        printf("\n── Backlinks (%lu) ────────────────────────────────────────────\n",
+               (unsigned long)backlinks.count);
+        for (NSUInteger i = 0; i < backlinks.count; i++) {
+            NSDictionary *bl = backlinks[i];
+            printf("  %lu. \"%s\" (#%ld)\n",
+                   (unsigned long)(i + 1),
+                   [bl[@"title"] UTF8String],
+                   (long)[bl[@"pk"] integerValue]);
+        }
+    }
+
+    // ── Content (document order) ──
+    printf("\n── Content ───────────────────────────────────────────────────\n");
+
+    // Get attributed string for inline walking
+    id inspectMergeStr = noteMergeableString(note);
+    NSAttributedString *inspectAttrStr = nil;
+    if (inspectMergeStr) {
+        @try {
+            inspectAttrStr = ((id (*)(id, SEL))objc_msgSend)(
+                inspectMergeStr, NSSelectorFromString(@"attributedString"));
+        } @catch (NSException *e) {}
+    }
+
+    if (!inspectAttrStr) {
+        // Fallback: plain body text
+        printf("%s\n", [body UTF8String]);
+        return 0;
+    }
+
+    // Build inline attachment lookup: identifier → info dict
+    NSMutableDictionary *inlineLookup = [NSMutableDictionary dictionary];
+    @try {
+        SEL inlineSel = NSSelectorFromString(@"allNoteTextInlineAttachments");
+        if ([note respondsToSelector:inlineSel]) {
+            id inspectInlineAtts = ((id (*)(id, SEL))objc_msgSend)(note, inlineSel);
+            for (id iAtt in inspectInlineAtts) {
+                NSString *iIdent = ((id (*)(id, SEL))objc_msgSend)(
+                    iAtt, NSSelectorFromString(@"identifier"));
+                if (!iIdent) continue;
+                NSString *iUTI = ((id (*)(id, SEL))objc_msgSend)(
+                    iAtt, NSSelectorFromString(@"typeUTI"));
+                NSString *iAlt = ((id (*)(id, SEL))objc_msgSend)(
+                    iAtt, NSSelectorFromString(@"altText"));
+                NSString *iTCI = ((id (*)(id, SEL))objc_msgSend)(
+                    iAtt, NSSelectorFromString(@"tokenContentIdentifier"));
+
+                NSMutableDictionary *iInfo = [NSMutableDictionary dictionary];
+                iInfo[@"altText"] = iAlt ?: @"";
+
+                if ([iUTI isEqualToString:@"com.apple.notes.inlinetextattachment.hashtag"]) {
+                    iInfo[@"type"] = @"tag";
+                } else if ([iUTI isEqualToString:@"com.apple.notes.inlinetextattachment.link"]) {
+                    iInfo[@"type"] = @"link";
+                    NSString *targetUUID = uuidFromTokenContentIdentifier(iTCI);
+                    if (targetUUID) {
+                        id target = findNoteByIdentifier(targetUUID);
+                        if (target) {
+                            iInfo[@"targetTitle"] = noteTitle(target);
+                            iInfo[@"targetPK"] = @(noteIntPK(target));
+                        }
+                    }
+                }
+                inlineLookup[iIdent] = iInfo;
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // Build table attachment lookup: identifier → ICAttachment
+    NSMutableDictionary *tableLookup = [NSMutableDictionary dictionary];
+    for (id tblAtt in tableAtts) {
+        NSString *tblIdent = ((id (*)(id, SEL))objc_msgSend)(
+            tblAtt, NSSelectorFromString(@"identifier"));
+        if (tblIdent) tableLookup[tblIdent] = tblAtt;
+    }
+
+    // Walk attributed string paragraph by paragraph
+    NSString *inspectFullText = [(NSAttributedString *)inspectAttrStr string];
+    NSUInteger inspectLen = inspectFullText.length;
+    NSUInteger inspectParaStart = 0;
+    BOOL skipTitle = YES;
+
+    while (inspectParaStart < inspectLen) {
+        NSRange inspNLRange = [inspectFullText rangeOfString:@"\n"
+            options:0 range:NSMakeRange(inspectParaStart, inspectLen - inspectParaStart)];
+        NSUInteger inspectParaEnd = (inspNLRange.location != NSNotFound)
+            ? inspNLRange.location + 1 : inspectLen;
+
+        // Skip title (first paragraph)
+        if (skipTitle) {
+            skipTitle = NO;
+            inspectParaStart = inspectParaEnd;
+            continue;
+        }
+
+        // Check if this paragraph is a checklist item
+        NSDictionary *pAttrs = [(NSAttributedString *)inspectAttrStr
+            attributesAtIndex:inspectParaStart effectiveRange:NULL];
+        id pStyle = pAttrs[@"TTStyle"];
+        BOOL isCL = NO;
+        BOOL clDone = NO;
+        if (pStyle) {
+            NSInteger sNum = ((NSInteger (*)(id, SEL))objc_msgSend)(
+                pStyle, NSSelectorFromString(@"style"));
+            if (sNum == 103) {
+                isCL = YES;
+                id pTodo = ((id (*)(id, SEL))objc_msgSend)(
+                    pStyle, NSSelectorFromString(@"todo"));
+                NSInteger dRaw = pTodo
+                    ? ((NSInteger (*)(id, SEL))objc_msgSend)(pTodo, NSSelectorFromString(@"done"))
+                    : 0;
+                clDone = (dRaw != 0);
+            }
+        }
+        if (isCL) printf("[%s] ", clDone ? "x" : " ");
+
+        // Walk characters in this paragraph
+        NSUInteger ci = inspectParaStart;
+        while (ci < inspectParaEnd) {
+            unichar cc = [inspectFullText characterAtIndex:ci];
+
+            if (cc == ATTACHMENT_MARKER) {
+                NSRange cEffRange;
+                NSDictionary *cAttrs = [(NSAttributedString *)inspectAttrStr
+                    attributesAtIndex:ci effectiveRange:&cEffRange];
+                id cTTAtt = cAttrs[@"NSAttachment"];
+
+                if (cTTAtt) {
+                    NSString *cAttId = ((id (*)(id, SEL))objc_msgSend)(
+                        cTTAtt, NSSelectorFromString(@"attachmentIdentifier"));
+                    NSString *cAttUTI = ((id (*)(id, SEL))objc_msgSend)(
+                        cTTAtt, NSSelectorFromString(@"attachmentUTI"));
+
+                    NSDictionary *cInfo = inlineLookup[cAttId];
+                    if (cInfo && [@"tag" isEqualToString:cInfo[@"type"]]) {
+                        // Native tag — show altText (e.g. "#cider")
+                        printf("%s", [cInfo[@"altText"] UTF8String]);
+                    } else if (cInfo && [@"link" isEqualToString:cInfo[@"type"]]) {
+                        // Note link
+                        NSString *cTarget = cInfo[@"targetTitle"];
+                        NSNumber *cTPK = cInfo[@"targetPK"];
+                        if (cTarget && cTPK)
+                            printf("[-> \"%s\" #%ld]",
+                                   [cTarget UTF8String], (long)[cTPK integerValue]);
+                        else if (cTarget)
+                            printf("[-> \"%s\"]", [cTarget UTF8String]);
+                        else
+                            printf("[-> %s]", [cInfo[@"altText"] UTF8String]);
+                    } else if (cAttUTI &&
+                               [cAttUTI isEqualToString:@"com.apple.notes.table"]) {
+                        // Table — render inline with aligned columns
+                        id cTblAtt = tableLookup[cAttId];
+                        if (cTblAtt) {
+                            @try {
+                                id cTM = ((id (*)(id, SEL))objc_msgSend)(
+                                    cTblAtt, NSSelectorFromString(@"tableModel"));
+                                id cTbl = ((id (*)(id, SEL))objc_msgSend)(
+                                    cTM, NSSelectorFromString(@"table"));
+                                NSUInteger tRows = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+                                    cTbl, NSSelectorFromString(@"rowCount"));
+                                NSUInteger tCols = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+                                    cTbl, NSSelectorFromString(@"columnCount"));
+
+                                NSMutableArray *tAllRows = [NSMutableArray array];
+                                NSMutableArray *tColW = [NSMutableArray array];
+                                for (NSUInteger tc = 0; tc < tCols; tc++)
+                                    [tColW addObject:@(0)];
+
+                                for (NSUInteger tr = 0; tr < tRows; tr++) {
+                                    @try {
+                                        NSArray *tStrings =
+                                            ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                                                cTM, NSSelectorFromString(@"stringsAtRow:"), tr);
+                                        NSMutableArray *tRow = [NSMutableArray array];
+                                        for (NSUInteger tc = 0; tc < tCols; tc++) {
+                                            NSString *tCell =
+                                                (tStrings && tc < tStrings.count)
+                                                    ? tStrings[tc] : @"";
+                                            [tRow addObject:tCell];
+                                            NSUInteger tw = [tCell length];
+                                            if (tw > [tColW[tc] unsignedIntegerValue])
+                                                tColW[tc] = @(tw);
+                                        }
+                                        [tAllRows addObject:tRow];
+                                    } @catch (NSException *e) {}
+                                }
+
+                                for (NSUInteger tr = 0; tr < tAllRows.count; tr++) {
+                                    NSArray *tRow = tAllRows[tr];
+                                    printf("  |");
+                                    for (NSUInteger tc = 0; tc < tCols; tc++) {
+                                        NSUInteger tw =
+                                            [tColW[tc] unsignedIntegerValue];
+                                        if (tw < 3) tw = 3;
+                                        printf(" %-*s |", (int)tw,
+                                               [tRow[tc] UTF8String]);
+                                    }
+                                    printf("\n");
+                                    if (tr == 0) {
+                                        printf("  |");
+                                        for (NSUInteger tc = 0; tc < tCols; tc++) {
+                                            NSUInteger tw =
+                                                [tColW[tc] unsignedIntegerValue];
+                                            if (tw < 3) tw = 3;
+                                            for (NSUInteger td = 0; td < tw + 2; td++)
+                                                printf("-");
+                                            printf("|");
+                                        }
+                                        printf("\n");
+                                    }
+                                }
+                            } @catch (NSException *e) {
+                                printf("[table: error]\n");
+                            }
+                        }
+                    } else {
+                        // File/image attachment
+                        NSString *cName = attachmentNameByID(atts, cAttId);
+                        printf("[attachment: %s (%s)]", [cName UTF8String],
+                               cAttUTI ? [cAttUTI UTF8String] : "unknown");
+                    }
+                }
+                ci++;
+            } else {
+                // Regular text — accumulate run until next marker
+                NSUInteger runStart = ci;
+                while (ci < inspectParaEnd &&
+                       [inspectFullText characterAtIndex:ci] != ATTACHMENT_MARKER)
+                    ci++;
+                NSString *textRun = [inspectFullText substringWithRange:
+                    NSMakeRange(runStart, ci - runStart)];
+                printf("%s", [textRun UTF8String]);
+            }
+        }
+
+        inspectParaStart = inspectParaEnd;
+    }
+
     return 0;
 }
 
@@ -671,6 +1152,8 @@ void cmdNotesDelete(NSUInteger idx) {
         return;
     }
 
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"delete");
     ((void (*)(id, SEL))objc_msgSend)(
         note, NSSelectorFromString(@"deleteFromLocalDatabase"));
 
@@ -696,9 +1179,38 @@ void cmdNotesMove(NSUInteger idx, NSString *targetFolderName) {
     }
 
     NSString *t = noteTitle(note);
+    id oldFolder = ((id (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"folder"));
+
+    // Skip if already in the target folder
+    if (oldFolder == folder) {
+        printf("Note \"%s\" is already in \"%s\"\n", [t UTF8String],
+               [targetFolderName UTF8String]);
+        return;
+    }
+
+    // 1. Change the Core Data folder relationship
     ((void (*)(id, SEL, id))objc_msgSend)(
         note, NSSelectorFromString(@"setFolder:"), folder);
-    [note setValue:[NSDate date] forKey:@"modificationDate"];
+
+    // 2. Mark note dirty so CloudKit knows to push
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"move");
+
+    // 3. Update the CKRecord's parent reference to point to the new folder
+    ((void (*)(id, SEL))objc_msgSend)(
+        note, NSSelectorFromString(@"updateParentReferenceIfNecessary"));
+
+    // 4. Record move activity event
+    @try {
+        ((id (*)(id, SEL, id, id, id))objc_msgSend)(
+            note,
+            NSSelectorFromString(@"persistMoveActivityEventForObject:fromParentObject:toParentObject:"),
+            note, oldFolder, folder);
+    } @catch (NSException *e) {}
+
+    // 5. Persist all pending changes
+    ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"persistPendingChanges"));
 
     if (saveContext()) {
         printf("Moved \"%s\" → \"%s\"\n", [t UTF8String],
@@ -872,6 +1384,336 @@ void cmdNotesDebug(NSUInteger idx, NSString *folder) {
         }
         printf("\n");
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMANDS: history (CRDT edit timeline)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return;
+    }
+
+    NSString *title = noteTitle(note);
+    id ms = noteMergeableString(note);
+    if (!ms) {
+        fprintf(stderr, "Error: No CRDT data for note %lu\n", (unsigned long)idx);
+        return;
+    }
+
+    // Get edits array (ICTTTextEdit objects with timestamp, replicaID, range)
+    NSArray *edits = nil;
+    @try {
+        edits = ((id (*)(id, SEL))objc_msgSend)(ms, NSSelectorFromString(@"edits"));
+    } @catch (NSException *e) {}
+    if (!edits || [edits count] == 0) {
+        if (jsonOutput) {
+            printf("{\"note\":%lu,\"title\":\"%s\",\"edits\":0,\"sessions\":[]}\n",
+                   (unsigned long)idx, [jsonEscapeString(title) UTF8String]);
+        } else {
+            printf("No edit history for \"%s\"\n", [title UTF8String]);
+        }
+        return;
+    }
+
+    // Get the current text for previewing what each edit region contains
+    id strObj = ((id (*)(id, SEL))objc_msgSend)(ms, NSSelectorFromString(@"string"));
+    NSString *fullStr = nil;
+    if ([strObj isKindOfClass:[NSAttributedString class]])
+        fullStr = [(NSAttributedString *)strObj string];
+    else if ([strObj isKindOfClass:[NSString class]])
+        fullStr = (NSString *)strObj;
+    NSUInteger textLen = fullStr ? fullStr.length : 0;
+
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    fmt.timeZone = [NSTimeZone localTimeZone];
+
+    NSDateFormatter *isoFmt = [[NSDateFormatter alloc] init];
+    isoFmt.dateFormat = @"yyyy-MM-dd'T'HH:mm:ssZZZZZ";
+    isoFmt.timeZone = [NSTimeZone localTimeZone];
+
+    // Build sorted edit list with extracted data
+    NSMutableArray *editData = [NSMutableArray arrayWithCapacity:[edits count]];
+    for (id edit in edits) {
+        NSDate *ts = nil;
+        NSUUID *rid = nil;
+        NSRange range = NSMakeRange(0, 0);
+        @try {
+            ts = ((id (*)(id, SEL))objc_msgSend)(edit, NSSelectorFromString(@"timestamp"));
+            rid = ((id (*)(id, SEL))objc_msgSend)(edit, NSSelectorFromString(@"replicaID"));
+            range = ((NSRange (*)(id, SEL))objc_msgSend)(edit, NSSelectorFromString(@"range"));
+        } @catch (NSException *e) { continue; }
+        if (!ts) continue;
+
+        NSString *text = @"";
+        if (fullStr && range.location < textLen && range.location + range.length <= textLen) {
+            text = [fullStr substringWithRange:range];
+        }
+
+        [editData addObject:@{
+            @"timestamp": ts,
+            @"replicaID": rid ? [rid UUIDString] : @"unknown",
+            @"range": [NSValue valueWithRange:range],
+            @"text": text
+        }];
+    }
+
+    // Sort by timestamp
+    [editData sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"timestamp"] compare:b[@"timestamp"]];
+    }];
+
+    // Collect unique replicas and assign short labels
+    NSMutableOrderedSet *replicaIDs = [NSMutableOrderedSet orderedSet];
+    for (NSDictionary *ed in editData) {
+        [replicaIDs addObject:ed[@"replicaID"]];
+    }
+
+    // Group into sessions (gap > 60 seconds = new session)
+    NSMutableArray *sessions = [NSMutableArray array];
+    NSMutableArray *currentSession = nil;
+    NSDate *lastTs = nil;
+
+    for (NSDictionary *ed in editData) {
+        NSDate *ts = ed[@"timestamp"];
+        if (!lastTs || [ts timeIntervalSinceDate:lastTs] > 60.0) {
+            currentSession = [NSMutableArray array];
+            [sessions addObject:currentSession];
+        }
+        [currentSession addObject:ed];
+        lastTs = ts;
+    }
+
+    // === JSON Output ===
+    if (jsonOutput) {
+        printf("{\"note\":%lu,\"title\":\"%s\",\"edits\":%lu,\"replicas\":[",
+               (unsigned long)idx, [jsonEscapeString(title) UTF8String],
+               (unsigned long)[editData count]);
+
+        for (NSUInteger i = 0; i < [replicaIDs count]; i++) {
+            if (i > 0) printf(",");
+            printf("\"%s\"", [(NSString *)[replicaIDs objectAtIndex:i] UTF8String]);
+        }
+        printf("],\"sessions\":[");
+
+        for (NSUInteger si = 0; si < sessions.count; si++) {
+            NSArray *sess = sessions[si];
+            if (si > 0) printf(",");
+
+            NSDate *startTs = sess[0][@"timestamp"];
+            NSDate *endTs = [sess lastObject][@"timestamp"];
+            NSUInteger totalChars = 0;
+            NSMutableString *preview = [NSMutableString string];
+            NSMutableSet *sessReplicas = [NSMutableSet set];
+
+            for (NSDictionary *ed in sess) {
+                NSRange r = [ed[@"range"] rangeValue];
+                totalChars += r.length;
+                [sessReplicas addObject:ed[@"replicaID"]];
+                if (preview.length < 120) {
+                    NSString *t = ed[@"text"];
+                    t = [t stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
+                    [preview appendString:t];
+                }
+            }
+            if (preview.length > 120) {
+                preview = [[preview substringToIndex:117] mutableCopy];
+                [preview appendString:@"..."];
+            }
+
+            printf("{\"start\":\"%s\",\"end\":\"%s\",\"edits\":%lu,\"chars\":%lu,\"preview\":\"%s\",\"replicas\":[",
+                   [[isoFmt stringFromDate:startTs] UTF8String],
+                   [[isoFmt stringFromDate:endTs] UTF8String],
+                   (unsigned long)sess.count,
+                   (unsigned long)totalChars,
+                   [jsonEscapeString(preview) UTF8String]);
+
+            NSArray *sr = [[sessReplicas allObjects] sortedArrayUsingSelector:@selector(compare:)];
+            for (NSUInteger ri = 0; ri < sr.count; ri++) {
+                if (ri > 0) printf(",");
+                printf("\"%s\"", [sr[ri] UTF8String]);
+            }
+            printf("]}");
+        }
+        printf("]}\n");
+        return;
+    }
+
+    // === Text Output ===
+    printf("History: \"%s\" (#%lu)\n", [title UTF8String], (unsigned long)idx);
+    printf("  %lu edit regions, %lu sessions, %lu device(s)\n\n",
+           (unsigned long)[editData count],
+           (unsigned long)sessions.count,
+           (unsigned long)[replicaIDs count]);
+
+    // Show replica legend if multiple
+    if ([replicaIDs count] > 1) {
+        printf("Devices:\n");
+        for (NSUInteger i = 0; i < [replicaIDs count]; i++) {
+            printf("  [%c] %s\n", (char)('A' + i),
+                   [(NSString *)[replicaIDs objectAtIndex:i] UTF8String]);
+        }
+        printf("\n");
+    }
+
+    if (raw) {
+        // Raw mode: show every edit region
+        printf("Edit Timeline (per-keystroke):\n\n");
+        for (NSDictionary *ed in editData) {
+            NSDate *ts = ed[@"timestamp"];
+            NSRange range = [ed[@"range"] rangeValue];
+            NSString *text = ed[@"text"];
+            NSString *rid = ed[@"replicaID"];
+            char deviceChar = 'A' + (char)[replicaIDs indexOfObject:rid];
+
+            text = [text stringByReplacingOccurrencesOfString:@"\n" withString:@"\u21b5"];
+            if (text.length > 60) {
+                text = [[text substringToIndex:57] stringByAppendingString:@"..."];
+            }
+
+            printf("  %s [%c] (%lu,%lu) %s\n",
+                   [[fmt stringFromDate:ts] UTF8String],
+                   deviceChar,
+                   (unsigned long)range.location,
+                   (unsigned long)range.length,
+                   [text UTF8String]);
+        }
+    } else {
+        // Session mode: group edits into editing sessions
+        printf("Edit Sessions:\n\n");
+        for (NSUInteger si = 0; si < sessions.count; si++) {
+            NSArray *sess = sessions[si];
+            NSDate *startTs = sess[0][@"timestamp"];
+            NSDate *endTs = [sess lastObject][@"timestamp"];
+            NSTimeInterval dur = [endTs timeIntervalSinceDate:startTs];
+            NSUInteger totalChars = 0;
+            NSMutableString *preview = [NSMutableString string];
+            NSMutableSet *sessReplicas = [NSMutableSet set];
+
+            for (NSDictionary *ed in sess) {
+                NSRange r = [ed[@"range"] rangeValue];
+                totalChars += r.length;
+                [sessReplicas addObject:ed[@"replicaID"]];
+                if (preview.length < 80) {
+                    NSString *t = ed[@"text"];
+                    t = [t stringByReplacingOccurrencesOfString:@"\n" withString:@"\u21b5"];
+                    [preview appendString:t];
+                }
+            }
+            if (preview.length > 80) {
+                preview = [[preview substringToIndex:77] mutableCopy];
+                [preview appendString:@"..."];
+            }
+
+            // Device labels
+            NSMutableString *devStr = [NSMutableString string];
+            for (NSString *rid in sessReplicas) {
+                if (devStr.length > 0) [devStr appendString:@","];
+                [devStr appendFormat:@"%c", (char)('A' + [replicaIDs indexOfObject:rid])];
+            }
+
+            // Duration string
+            NSString *durStr;
+            if (dur < 1.0)
+                durStr = @"instant";
+            else if (dur < 60.0)
+                durStr = [NSString stringWithFormat:@"%.0fs", dur];
+            else if (dur < 3600.0)
+                durStr = [NSString stringWithFormat:@"%dm%ds", (int)(dur/60), (int)fmod(dur,60)];
+            else
+                durStr = [NSString stringWithFormat:@"%dh%dm", (int)(dur/3600), (int)fmod(dur/60,60)];
+
+            printf("  %s  [%s]  %lu edits, %lu chars (%s)\n",
+                   [[fmt stringFromDate:startTs] UTF8String],
+                   [devStr UTF8String],
+                   (unsigned long)sess.count,
+                   (unsigned long)totalChars,
+                   [durStr UTF8String]);
+            printf("    %s\n\n", [preview UTF8String]);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMANDS: getdate / setdate
+// ─────────────────────────────────────────────────────────────────────────────
+
+int cmdNotesGetdate(NSUInteger idx, NSString *folder, BOOL jsonOutput) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSString *title = noteTitle(note);
+    NSDate *modified = [note valueForKey:@"modificationDate"];
+    NSDate *created = [note valueForKey:@"creationDate"];
+    NSString *ident = noteIdentifier(note);
+
+    if (jsonOutput) {
+        printf("{\"index\":%lu,\"title\":\"%s\",\"modified\":\"%s\","
+               "\"created\":\"%s\",\"identifier\":\"%s\"}\n",
+               (unsigned long)idx,
+               [jsonEscapeString(title) UTF8String],
+               [isoDateString(modified) UTF8String],
+               [isoDateString(created) UTF8String],
+               [jsonEscapeString(ident ?: @"") UTF8String]);
+    } else {
+        printf("%lu  \"%s\"  modified: %s  created: %s  id: %s\n",
+               (unsigned long)idx,
+               [title UTF8String],
+               [isoDateString(modified) UTF8String],
+               [isoDateString(created) UTF8String],
+               [ident ?: @"(none)" UTF8String]);
+    }
+    return 0;
+}
+
+int cmdNotesSetdate(NSUInteger idx, NSString *dateStr, NSString *folder, BOOL dryRun) {
+    id note = noteAtIndex(idx, folder);
+    if (!note) {
+        fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
+        return 1;
+    }
+
+    NSDate *newDate = parseDateString(dateStr);
+    if (!newDate) {
+        fprintf(stderr, "Error: Invalid date '%s'. Use ISO 8601 (2024-01-15T14:30:00 or 2024-01-15).\n",
+                [dateStr UTF8String]);
+        return 1;
+    }
+
+    NSString *title = noteTitle(note);
+    NSDate *oldDate = [note valueForKey:@"modificationDate"];
+
+    if (dryRun) {
+        printf("[dry-run] %lu  \"%s\"  %s → %s\n",
+               (unsigned long)idx,
+               [title UTF8String],
+               [isoDateString(oldDate) UTF8String],
+               [isoDateString(newDate) UTF8String]);
+        return 0;
+    }
+
+    [note setValue:newDate forKey:@"modificationDate"];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"setdate");
+
+    if (!saveContext()) {
+        fprintf(stderr, "Error: Failed to save\n");
+        return 1;
+    }
+
+    printf("Updated %lu  \"%s\"  %s → %s\n",
+           (unsigned long)idx,
+           [title UTF8String],
+           [isoDateString(oldDate) UTF8String],
+           [isoDateString(newDate) UTF8String]);
+    return 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1084,6 +1926,8 @@ int cmdSettingsReset(void) {
     NSArray *notes = filteredNotes(@"Cider Templates");
     for (id note in notes) {
         if ([noteTitle(note) isEqualToString:@"Cider Settings"]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"delete");
             ((void (*)(id, SEL, BOOL))objc_msgSend)(
                 note, NSSelectorFromString(@"setMarkedForDeletion:"), YES);
             if (!saveContext()) return 1;
@@ -1110,6 +1954,8 @@ int cmdNotesPin(NSUInteger idx, NSString *folder) {
 
     ((void (*)(id, SEL, BOOL))objc_msgSend)(
         note, NSSelectorFromString(@"setIsPinned:"), YES);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"pin");
 
     if (!saveContext()) return 1;
     printf("📌 Pinned note %lu: \"%s\"\n", (unsigned long)idx,
@@ -1133,6 +1979,8 @@ int cmdNotesUnpin(NSUInteger idx, NSString *folder) {
 
     ((void (*)(id, SEL, BOOL))objc_msgSend)(
         note, NSSelectorFromString(@"setIsPinned:"), NO);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"unpin");
 
     if (!saveContext()) return 1;
     printf("📌 Unpinned note %lu: \"%s\"\n", (unsigned long)idx,
@@ -1581,6 +2429,8 @@ int cmdFolderDelete(NSString *name) {
 
     ((void (*)(id, SEL, BOOL))objc_msgSend)(
         folder, NSSelectorFromString(@"setMarkedForDeletion:"), YES);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        folder, NSSelectorFromString(@"updateChangeCountWithReason:"), @"delete");
 
     if (!saveContext()) return 1;
     printf("Deleted folder: \"%s\"\n", [name UTF8String]);
@@ -1603,6 +2453,8 @@ int cmdFolderRename(NSString *oldName, NSString *newName) {
 
     ((void (*)(id, SEL, id))objc_msgSend)(
         folder, NSSelectorFromString(@"setTitle:"), newName);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        folder, NSSelectorFromString(@"updateChangeCountWithReason:"), @"rename");
 
     if (!saveContext()) return 1;
     printf("Renamed folder: \"%s\" → \"%s\"\n", [oldName UTF8String],
@@ -1664,6 +2516,8 @@ int cmdTemplatesDelete(NSString *name) {
     for (id note in notes) {
         NSString *title = noteTitle(note);
         if ([title caseInsensitiveCompare:name] == NSOrderedSame) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"delete");
             ((void (*)(id, SEL, BOOL))objc_msgSend)(
                 note, NSSelectorFromString(@"setMarkedForDeletion:"), YES);
             if (!saveContext()) return 1;
@@ -2091,10 +2945,8 @@ void cmdNotesAttachAt(NSUInteger idx, NSString *filePath, NSUInteger position) {
     ((void (*)(id, SEL))objc_msgSend)(mergeStr, NSSelectorFromString(@"generateIdsForLocalChanges"));
 
     ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
-    NSError *saveErr = nil;
-    [g_moc save:&saveErr];
-    if (saveErr) {
-        fprintf(stderr, "Error saving: %s\n", [[saveErr localizedDescription] UTF8String]);
+    if (!saveContext()) {
+        fprintf(stderr, "Error: Failed to save attachment\n");
         return;
     }
 
@@ -2175,10 +3027,8 @@ void cmdNotesDetach(NSUInteger idx, NSUInteger attIdx) {
     }
 
     ((void (*)(id, SEL))objc_msgSend)(note, NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
-    NSError *saveErr = nil;
-    [g_moc save:&saveErr];
-    if (saveErr) {
-        fprintf(stderr, "Error saving: %s\n", [[saveErr localizedDescription] UTF8String]);
+    if (!saveContext()) {
+        fprintf(stderr, "Error: Failed to save detachment\n");
         return;
     }
 
@@ -3376,6 +4226,8 @@ int cmdNotesTableAdd(NSUInteger idx, NSString *folder, NSArray *rows) {
             NSSelectorFromString(@"saveNoteData"));
         ((void (*)(id, SEL))objc_msgSend)(note,
             NSSelectorFromString(@"updateDerivedAttributesIfNeeded"));
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            note, NSSelectorFromString(@"updateChangeCountWithReason:"), @"tableEdit");
         if (!saveContext()) return 1;
 
         printf("Added %lu row(s) to existing table in note %lu\n",

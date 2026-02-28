@@ -134,6 +134,10 @@ void printNotesHelp(void) {
 "  cider notes list [options]               List notes (filter, sort, date range)\n"
 "  cider notes <N>                          View note N\n"
 "  cider notes show <N> [--json]            View note N\n"
+"  cider notes inspect <N> [--json]        Full note details (metadata, tags, links, tables...)\n"
+"  cider notes history <N> [--raw|--json]  CRDT edit timeline (who typed what, when)\n"
+"  cider notes getdate <N> [--json]        Show note's modification/creation dates\n"
+"  cider notes setdate <N> <date> [--dry-run]  Set note's modification date\n"
 "  cider notes folders [--json]             List all folders\n"
 "  cider notes add [--folder <f>]           Add note (reads stdin or $EDITOR)\n"
 "  cider notes edit <N>                     Edit note N via CRDT (preserves attachments)\n"
@@ -316,6 +320,33 @@ void printNotesHelp(void) {
 "    cider notes unpin 3\n"
 "    cider notes list --pinned\n"
 "    cider notes pin 1 -f Work\n"
+"\n"
+"HISTORY:\n"
+"  cider notes history <N>                 Show CRDT edit timeline\n"
+"  cider notes history <N> --raw           Per-keystroke detail\n"
+"  cider notes history <N> --json          JSON output\n"
+"\n"
+"  Shows when and how a note was edited, extracted from the CRDT.\n"
+"  Default groups edits into sessions (>60s gap = new session).\n"
+"  --raw shows every individual edit with per-second timestamps.\n"
+"  Each device that edited the note gets a letter label (A, B, C...).\n"
+"\n"
+"  Examples:\n"
+"    cider notes history 5                 Session-grouped timeline\n"
+"    cider notes history 5 --raw           Every keystroke\n"
+"    cider notes history 5 --json          JSON for piping\n"
+"\n"
+"DATES:\n"
+"  cider notes getdate <N> [--json]        Show modification & creation dates\n"
+"  cider notes setdate <N> <date>          Set modification date\n"
+"  cider notes setdate <N> <date> --dry-run  Preview without changing\n"
+"\n"
+"  Date format: ISO 8601 (2024-01-15T14:30:00 or 2024-01-15)\n"
+"\n"
+"  Examples:\n"
+"    cider notes getdate 349               Show dates for note 349\n"
+"    cider notes setdate 349 2024-06-15T10:30:00  Set modification date\n"
+"    cider notes setdate 349 2024-06-15 --dry-run  Preview change\n"
 "\n"
 "DEBUG:\n"
 "  cider notes debug <N> [-f <folder>]\n"
@@ -523,6 +554,19 @@ int main(int argc, char *argv[]) {
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
                 return cmdNotesView(idx, nil, jsonOut);
 
+            // ── cider notes inspect ──
+            } else if ([sub isEqualToString:@"inspect"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *fldr = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"inspect", fldr);
+                if (!idx) return 1;
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                return cmdNotesInspect(idx, fldr, jsonOut);
+
             // ── cider notes folders ──
             } else if ([sub isEqualToString:@"folders"]) {
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
@@ -683,6 +727,57 @@ int main(int argc, char *argv[]) {
                 if (!idx) idx = promptNoteIndex(@"debug", folder);
                 if (!idx) return 1;
                 cmdNotesDebug(idx, folder);
+
+            // ── cider notes history ──
+            } else if ([sub isEqualToString:@"history"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"history", folder);
+                if (!idx) return 1;
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                BOOL rawOut = argHasFlag(argc, argv, 3, "--raw", NULL);
+                cmdNotesHistory(idx, folder, jsonOut, rawOut);
+
+            // ── cider notes getdate ──
+            } else if ([sub isEqualToString:@"getdate"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"get date of", folder);
+                if (!idx) return 1;
+                BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+                return cmdNotesGetdate(idx, folder, jsonOut);
+
+            // ── cider notes setdate ──
+            } else if ([sub isEqualToString:@"setdate"]) {
+                NSUInteger idx = 0;
+                if (argc >= 4) {
+                    int v = atoi(argv[3]);
+                    if (v > 0) idx = (NSUInteger)v;
+                }
+                NSString *folder = argValue(argc, argv, 3, "--folder", "-f");
+                if (!idx) idx = promptNoteIndex(@"set date on", folder);
+                if (!idx) return 1;
+                BOOL dryRun = argHasFlag(argc, argv, 3, "--dry-run", NULL);
+                NSString *dateStr = nil;
+                for (int i = 4; i < argc; i++) {
+                    if (argv[i][0] != '-') {
+                        dateStr = [NSString stringWithUTF8String:argv[i]];
+                        break;
+                    }
+                }
+                if (!dateStr) {
+                    fprintf(stderr, "Usage: cider notes setdate <N> <ISO-date> [--dry-run]\n");
+                    return 1;
+                }
+                return cmdNotesSetdate(idx, dateStr, folder, dryRun);
 
             // ── cider notes pin ──
             } else if ([sub isEqualToString:@"pin"]) {
