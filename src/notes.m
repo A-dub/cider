@@ -1473,6 +1473,85 @@ void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw
         [replicaIDs addObject:ed[@"replicaID"]];
     }
 
+    // Build replica UUID → person name mapping
+    NSMutableDictionary *replicaNames = [NSMutableDictionary dictionary];
+
+    // 1. Decode replicaIDToUserIDDictData via ICMergeableDictionary → {replicaUUID: userRecordID}
+    NSMutableDictionary *replicaToUserID = [NSMutableDictionary dictionary];
+    @try {
+        NSData *dictData = [note valueForKey:@"replicaIDToUserIDDictData"];
+        if (dictData.length > 0) {
+            Class mdClass = NSClassFromString(@"ICMergeableDictionary");
+            if (mdClass) {
+                id md = ((id (*)(id, SEL, id, id))objc_msgSend)(
+                    [mdClass alloc], NSSelectorFromString(@"initWithData:replicaID:"),
+                    dictData, [NSUUID UUID]);
+                if (md) {
+                    NSArray *keys = ((id (*)(id, SEL))objc_msgSend)(md, NSSelectorFromString(@"allKeys"));
+                    for (id key in keys) {
+                        id val = ((id (*)(id, SEL, id))objc_msgSend)(md, NSSelectorFromString(@"objectForKey:"), key);
+                        if (val) replicaToUserID[[key description]] = [val description];
+                    }
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // 2. Get CKShare participants → {userRecordID: name}
+    NSMutableDictionary *userIDToName = [NSMutableDictionary dictionary];
+    NSString *currentUserName = nil;
+    NSMutableSet *knownRecordNames = [NSMutableSet set];
+    @try {
+        id share = [note valueForKey:@"serverShare"];
+        if (share) {
+            id participants = ((id (*)(id, SEL))objc_msgSend)(share, NSSelectorFromString(@"participants"));
+            for (id part in (NSArray *)participants) {
+                id identity = ((id (*)(id, SEL))objc_msgSend)(part, NSSelectorFromString(@"userIdentity"));
+                if (!identity) continue;
+                id nameComp = ((id (*)(id, SEL))objc_msgSend)(identity, NSSelectorFromString(@"nameComponents"));
+                id userRecordID = ((id (*)(id, SEL))objc_msgSend)(identity, NSSelectorFromString(@"userRecordID"));
+                NSString *recordName = userRecordID ?
+                    ((id (*)(id, SEL))objc_msgSend)(userRecordID, NSSelectorFromString(@"recordName")) : nil;
+                BOOL isCurrent = ((BOOL (*)(id, SEL))objc_msgSend)(part, NSSelectorFromString(@"isCurrentUser"));
+
+                NSString *given = nameComp ? [nameComp valueForKey:@"givenName"] : nil;
+                NSString *family = nameComp ? [nameComp valueForKey:@"familyName"] : nil;
+                NSString *name = nil;
+                if (given.length > 0 && family.length > 0)
+                    name = [NSString stringWithFormat:@"%@ %@", given, family];
+                else if (given.length > 0)
+                    name = given;
+
+                if (name && recordName) {
+                    userIDToName[recordName] = name;
+                    [knownRecordNames addObject:recordName];
+                }
+                if (name && isCurrent)
+                    currentUserName = name;
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // 3. For current user: CKShare uses __defaultOwner__ as recordName,
+    //    but replica mapping uses the real CloudKit record ID.
+    //    Map any unmatched userIDs to the current user's name.
+    if (currentUserName) {
+        NSMutableSet *allUserIDs = [NSMutableSet set];
+        for (NSString *uid in [replicaToUserID allValues])
+            [allUserIDs addObject:uid];
+        for (NSString *uid in allUserIDs) {
+            if (![knownRecordNames containsObject:uid])
+                userIDToName[uid] = currentUserName;
+        }
+    }
+
+    // 4. Cross-reference: for each replica in this note's edits, look up user → name
+    for (NSString *rid in replicaIDs) {
+        NSString *userID = replicaToUserID[rid] ?: replicaToUserID[[rid uppercaseString]];
+        if (userID && userIDToName[userID])
+            replicaNames[rid] = userIDToName[userID];
+    }
+
     // Group into sessions (gap > 60 seconds = new session)
     NSMutableArray *sessions = [NSMutableArray array];
     NSMutableArray *currentSession = nil;
@@ -1490,13 +1569,19 @@ void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw
 
     // === JSON Output ===
     if (jsonOutput) {
-        printf("{\"note\":%lu,\"title\":\"%s\",\"edits\":%lu,\"replicas\":[",
+        printf("{\"note\":%lu,\"title\":\"%s\",\"edits\":%lu,\"devices\":[",
                (unsigned long)idx, [jsonEscapeString(title) UTF8String],
                (unsigned long)[editData count]);
 
         for (NSUInteger i = 0; i < [replicaIDs count]; i++) {
             if (i > 0) printf(",");
-            printf("\"%s\"", [(NSString *)[replicaIDs objectAtIndex:i] UTF8String]);
+            NSString *rid = [replicaIDs objectAtIndex:i];
+            NSString *shortID = [[rid substringToIndex:MIN([(NSString *)rid length], (NSUInteger)4)] uppercaseString];
+            NSString *name = replicaNames[rid];
+            if (name)
+                printf("{\"id\":\"%s\",\"uuid\":\"%s\",\"name\":\"%s\"}", [shortID UTF8String], [rid UTF8String], [jsonEscapeString(name) UTF8String]);
+            else
+                printf("{\"id\":\"%s\",\"uuid\":\"%s\"}", [shortID UTF8String], [rid UTF8String]);
         }
         printf("],\"sessions\":[");
 
@@ -1544,96 +1629,166 @@ void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw
     }
 
     // === Text Output ===
+
+    // Build device labels: use person name if available, else short hex ID
+    NSMutableDictionary *deviceLabels = [NSMutableDictionary dictionary];
+    for (NSString *rid in replicaIDs) {
+        NSString *name = replicaNames[rid];
+        if (name)
+            deviceLabels[rid] = name;
+        else {
+            NSString *shortID = [[rid substringToIndex:MIN(rid.length, (NSUInteger)4)] uppercaseString];
+            deviceLabels[rid] = shortID;
+        }
+    }
+
     printf("History: \"%s\" (#%lu)\n", [title UTF8String], (unsigned long)idx);
-    printf("  %lu edit regions, %lu sessions, %lu device(s)\n\n",
+    printf("  %lu edits, %lu sessions, %lu device(s)\n",
            (unsigned long)[editData count],
            (unsigned long)sessions.count,
            (unsigned long)[replicaIDs count]);
 
-    // Show replica legend if multiple
+    // Show device legend
     if ([replicaIDs count] > 1) {
-        printf("Devices:\n");
+        printf("  Devices:");
         for (NSUInteger i = 0; i < [replicaIDs count]; i++) {
-            printf("  [%c] %s\n", (char)('A' + i),
-                   [(NSString *)[replicaIDs objectAtIndex:i] UTF8String]);
+            NSString *rid = [replicaIDs objectAtIndex:i];
+            printf(" %s", [deviceLabels[rid] UTF8String]);
         }
         printf("\n");
     }
+    printf("\n");
 
     if (raw) {
         // Raw mode: show every edit region
-        printf("Edit Timeline (per-keystroke):\n\n");
         for (NSDictionary *ed in editData) {
             NSDate *ts = ed[@"timestamp"];
-            NSRange range = [ed[@"range"] rangeValue];
             NSString *text = ed[@"text"];
             NSString *rid = ed[@"replicaID"];
-            char deviceChar = 'A' + (char)[replicaIDs indexOfObject:rid];
+            NSString *devLabel = deviceLabels[rid];
 
-            text = [text stringByReplacingOccurrencesOfString:@"\n" withString:@"\u21b5"];
-            if (text.length > 60) {
-                text = [[text substringToIndex:57] stringByAppendingString:@"..."];
+            NSString *display = [text stringByReplacingOccurrencesOfString:@"\n" withString:@"\u21b5"];
+            if (display.length > 70) {
+                display = [[display substringToIndex:67] stringByAppendingString:@"..."];
             }
 
-            printf("  %s [%c] (%lu,%lu) %s\n",
+            printf("  %s  %-4s  + \"%s\"\n",
                    [[fmt stringFromDate:ts] UTF8String],
-                   deviceChar,
-                   (unsigned long)range.location,
-                   (unsigned long)range.length,
-                   [text UTF8String]);
+                   [devLabel UTF8String],
+                   [display UTF8String]);
         }
     } else {
         // Session mode: group edits into editing sessions
-        printf("Edit Sessions:\n\n");
         for (NSUInteger si = 0; si < sessions.count; si++) {
             NSArray *sess = sessions[si];
             NSDate *startTs = sess[0][@"timestamp"];
             NSDate *endTs = [sess lastObject][@"timestamp"];
             NSTimeInterval dur = [endTs timeIntervalSinceDate:startTs];
             NSUInteger totalChars = 0;
-            NSMutableString *preview = [NSMutableString string];
-            NSMutableSet *sessReplicas = [NSMutableSet set];
+
+            // Build person-attributed chunks: [{person, text}]
+            // Merge adjacent edits from the same person into one chunk
+            NSMutableArray *personChunks = [NSMutableArray array];
+            NSString *currentPerson = nil;
+            NSMutableString *currentChunk = nil;
+            NSUInteger lastEnd = NSNotFound;
 
             for (NSDictionary *ed in sess) {
                 NSRange r = [ed[@"range"] rangeValue];
                 totalChars += r.length;
-                [sessReplicas addObject:ed[@"replicaID"]];
-                if (preview.length < 80) {
-                    NSString *t = ed[@"text"];
-                    t = [t stringByReplacingOccurrencesOfString:@"\n" withString:@"\u21b5"];
-                    [preview appendString:t];
+                NSString *person = deviceLabels[ed[@"replicaID"]];
+                NSString *t = ed[@"text"];
+                if (t.length == 0) continue;
+
+                BOOL samePerson = [person isEqualToString:currentPerson ?: @""];
+                BOOL adjacent = (lastEnd != NSNotFound && r.location == lastEnd);
+
+                if (samePerson && adjacent && currentChunk) {
+                    [currentChunk appendString:t];
+                } else {
+                    if (currentChunk && currentChunk.length > 0) {
+                        [personChunks addObject:@{@"person": currentPerson, @"text": [currentChunk copy]}];
+                    }
+                    currentPerson = person;
+                    currentChunk = [t mutableCopy];
                 }
+                lastEnd = r.location + r.length;
             }
-            if (preview.length > 80) {
-                preview = [[preview substringToIndex:77] mutableCopy];
-                [preview appendString:@"..."];
+            if (currentChunk && currentChunk.length > 0) {
+                [personChunks addObject:@{@"person": currentPerson ?: @"?", @"text": [currentChunk copy]}];
             }
 
-            // Device labels
-            NSMutableString *devStr = [NSMutableString string];
-            for (NSString *rid in sessReplicas) {
-                if (devStr.length > 0) [devStr appendString:@","];
-                [devStr appendFormat:@"%c", (char)('A' + [replicaIDs indexOfObject:rid])];
+            // Time gap since previous session
+            NSString *gapStr = @"";
+            if (si > 0) {
+                NSDate *prevEnd = [sessions[si-1] lastObject][@"timestamp"];
+                NSTimeInterval gap = [startTs timeIntervalSinceDate:prevEnd];
+                if (gap < 3600)
+                    gapStr = [NSString stringWithFormat:@"  (%.0fm later)", gap/60];
+                else if (gap < 86400)
+                    gapStr = [NSString stringWithFormat:@"  (%.1fh later)", gap/3600];
+                else
+                    gapStr = [NSString stringWithFormat:@"  (%.0fd later)", gap/86400];
             }
 
             // Duration string
-            NSString *durStr;
-            if (dur < 1.0)
-                durStr = @"instant";
-            else if (dur < 60.0)
-                durStr = [NSString stringWithFormat:@"%.0fs", dur];
-            else if (dur < 3600.0)
-                durStr = [NSString stringWithFormat:@"%dm%ds", (int)(dur/60), (int)fmod(dur,60)];
-            else
-                durStr = [NSString stringWithFormat:@"%dh%dm", (int)(dur/3600), (int)fmod(dur/60,60)];
+            NSString *durStr = @"";
+            if (dur >= 1.0 && dur < 60.0)
+                durStr = [NSString stringWithFormat:@", %.0fs", dur];
+            else if (dur >= 60.0 && dur < 3600.0)
+                durStr = [NSString stringWithFormat:@", %dm%ds", (int)(dur/60), (int)fmod(dur,60)];
+            else if (dur >= 3600.0)
+                durStr = [NSString stringWithFormat:@", %dh%dm", (int)(dur/3600), (int)fmod(dur/60,60)];
 
-            printf("  %s  [%s]  %lu edits, %lu chars (%s)\n",
+            printf("  %s  %lu chars%s%s\n",
                    [[fmt stringFromDate:startTs] UTF8String],
-                   [devStr UTF8String],
-                   (unsigned long)sess.count,
                    (unsigned long)totalChars,
-                   [durStr UTF8String]);
-            printf("    %s\n\n", [preview UTF8String]);
+                   [durStr UTF8String],
+                   [gapStr UTF8String]);
+
+            // Merge consecutive chunks from the same person
+            NSMutableArray *mergedChunks = [NSMutableArray array];
+            for (NSDictionary *pc in personChunks) {
+                NSDictionary *last = [mergedChunks lastObject];
+                if (last && [last[@"person"] isEqualToString:pc[@"person"]]) {
+                    NSString *merged = [NSString stringWithFormat:@"%@\n%@", last[@"text"], pc[@"text"]];
+                    [mergedChunks removeLastObject];
+                    [mergedChunks addObject:@{@"person": pc[@"person"], @"text": merged}];
+                } else {
+                    [mergedChunks addObject:pc];
+                }
+            }
+
+            // Show person-attributed content
+            for (NSDictionary *pc in mergedChunks) {
+                NSString *person = pc[@"person"];
+                NSString *text = pc[@"text"];
+
+                // Collapse into non-empty lines
+                NSArray *lines = [text componentsSeparatedByString:@"\n"];
+                NSMutableArray *nonEmpty = [NSMutableArray array];
+                for (NSString *line in lines) {
+                    NSString *trimmed = [line stringByTrimmingCharactersInSet:
+                        [NSCharacterSet whitespaceCharacterSet]];
+                    if (trimmed.length > 0) [nonEmpty addObject:trimmed];
+                }
+
+                if (nonEmpty.count == 0) continue;
+
+                // Show person label, then all their lines indented
+                printf("    %s:\n", [person UTF8String]);
+                for (NSUInteger li = 0; li < nonEmpty.count && li < 12; li++) {
+                    NSString *line = nonEmpty[li];
+                    if (line.length > 120)
+                        line = [[line substringToIndex:117] stringByAppendingString:@"..."];
+                    printf("      %s\n", [line UTF8String]);
+                }
+                if (nonEmpty.count > 12) {
+                    printf("      ... (%lu more lines)\n",
+                           (unsigned long)(nonEmpty.count - 12));
+                }
+            }
+            printf("\n");
         }
     }
 }

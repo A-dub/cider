@@ -192,6 +192,7 @@ NSString *syncDefaultDir(void);
 
 void printHelp(void);
 void printNotesHelp(void);
+void printNotesSubcommandHelp(const char *sub);
 void printRemHelp(void);
 NSString *argValue(int argc, char *argv[], int startIdx,
                    const char *flag1, const char *flag2);
