@@ -120,7 +120,7 @@ void cmdNotesSearch(NSString *query, BOOL jsonOutput, BOOL useRegex,
 int  cmdNotesAppend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 int  cmdNotesPrepend(NSUInteger idx, NSString *text, NSString *folder, BOOL noNewline);
 void cmdNotesDebug(NSUInteger idx, NSString *folder);
-void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw);
+void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw, BOOL blame);
 int  cmdNotesGetdate(NSUInteger idx, NSString *folder, BOOL jsonOutput);
 int  cmdNotesSetdate(NSUInteger idx, NSString *dateStr, NSString *folder, BOOL dryRun);
 void cmdSettings(BOOL jsonOutput);

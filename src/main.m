@@ -59,7 +59,7 @@ void printNotesHelp(void) {
 "  backlinks <N> Show notes linking to note N\n"
 "  link <N>      Create a link to another note\n"
 "  watch         Stream note change events\n"
-"  history <N>   CRDT edit timeline (who edited, when)\n"
+"  history <N>   Edit timeline & blame (who wrote what, when)\n"
 "  getdate <N>   Show modification/creation dates\n"
 "  setdate <N>   Set modification date\n"
 "  folder        Create, delete, or rename folders\n"
@@ -373,18 +373,22 @@ void printNotesSubcommandHelp(const char *sub) {
         );
     } else if (strcmp(sub, "history") == 0) {
         printf(
-"cider notes history <N> [--raw] [--json] [-f <folder>]\n"
+"cider notes history <N> [--blame] [--raw] [--json] [-f <folder>]\n"
 "\n"
-"  Show CRDT edit timeline — who edited the note and when.\n"
-"  Groups edits into sessions (>60s gap = new session).\n"
+"  Show CRDT edit history — who edited the note and when.\n"
 "  Shows person names for shared notes, device IDs otherwise.\n"
 "\n"
 "OPTIONS:\n"
+"  --blame  Annotated view: each line shows who wrote it and when\n"
 "  --raw    Per-keystroke detail (every individual edit)\n"
 "  --json   JSON output with devices and sessions\n"
 "\n"
+"  Default groups edits into sessions (>60s gap = new session).\n"
+"  --blame shows the current note text like 'git blame'.\n"
+"\n"
 "EXAMPLES:\n"
 "  cider notes history 5\n"
+"  cider notes history 5 --blame\n"
 "  cider notes history 5 --raw\n"
 "  cider notes history 5 --json\n"
         );
@@ -776,7 +780,8 @@ int main(int argc, char *argv[]) {
                 if (!idx) return 1;
                 BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
                 BOOL rawOut = argHasFlag(argc, argv, 3, "--raw", NULL);
-                cmdNotesHistory(idx, folder, jsonOut, rawOut);
+                BOOL blameOut = argHasFlag(argc, argv, 3, "--blame", NULL);
+                cmdNotesHistory(idx, folder, jsonOut, rawOut, blameOut);
 
             // ── cider notes getdate ──
             } else if ([sub isEqualToString:@"getdate"]) {

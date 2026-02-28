@@ -1390,7 +1390,7 @@ void cmdNotesDebug(NSUInteger idx, NSString *folder) {
 // COMMANDS: history (CRDT edit timeline)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw) {
+void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw, BOOL blame) {
     id note = noteAtIndex(idx, folder);
     if (!note) {
         fprintf(stderr, "Error: Note %lu not found\n", (unsigned long)idx);
@@ -1565,6 +1565,100 @@ void cmdNotesHistory(NSUInteger idx, NSString *folder, BOOL jsonOutput, BOOL raw
         }
         [currentSession addObject:ed];
         lastTs = ts;
+    }
+
+    // === Blame Output ===
+    if (blame) {
+        // Build device labels: person name or short hex ID
+        NSMutableDictionary *deviceLabels = [NSMutableDictionary dictionary];
+        NSUInteger maxLabelLen = 0;
+        for (NSString *rid in replicaIDs) {
+            NSString *name = replicaNames[rid];
+            if (!name) {
+                name = [[rid substringToIndex:MIN(rid.length, (NSUInteger)4)] uppercaseString];
+            }
+            deviceLabels[rid] = name;
+            if (name.length > maxLabelLen) maxLabelLen = name.length;
+        }
+        if (maxLabelLen > 16) maxLabelLen = 16;
+
+        // Build character-level attribution: who wrote each character
+        NSMutableArray *charOwner = [NSMutableArray arrayWithCapacity:textLen];
+        for (NSUInteger i = 0; i < textLen; i++)
+            [charOwner addObject:@""];
+        NSMutableArray *charTimestamp = [NSMutableArray arrayWithCapacity:textLen];
+        for (NSUInteger i = 0; i < textLen; i++)
+            [charTimestamp addObject:[NSDate distantPast]];
+
+        for (NSDictionary *ed in editData) {
+            NSRange r = [ed[@"range"] rangeValue];
+            NSString *rid = ed[@"replicaID"];
+            NSDate *ts = ed[@"timestamp"];
+            for (NSUInteger i = r.location; i < r.location + r.length && i < textLen; i++) {
+                charOwner[i] = rid;
+                charTimestamp[i] = ts;
+            }
+        }
+
+        // Date formatter for blame (short)
+        NSDateFormatter *blameFmt = [[NSDateFormatter alloc] init];
+        blameFmt.dateFormat = @"yyyy-MM-dd";
+        blameFmt.timeZone = [NSTimeZone localTimeZone];
+
+        // Walk text line by line, determine dominant author per line
+        printf("\"%s\" (#%lu)\n\n", [title UTF8String], (unsigned long)idx);
+
+        NSArray *textLines = [fullStr componentsSeparatedByString:@"\n"];
+        NSUInteger charPos = 0;
+        for (NSUInteger li = 0; li < textLines.count; li++) {
+            NSString *line = textLines[li];
+            NSUInteger lineLen = line.length;
+
+            // Find dominant author for this line (most chars)
+            NSMutableDictionary *authorCounts = [NSMutableDictionary dictionary];
+            NSDate *latestTs = [NSDate distantPast];
+            for (NSUInteger i = charPos; i < charPos + lineLen && i < textLen; i++) {
+                NSString *owner = charOwner[i];
+                if (owner.length > 0) {
+                    authorCounts[owner] = @([authorCounts[owner] integerValue] + 1);
+                    NSDate *ts = charTimestamp[i];
+                    if ([ts compare:latestTs] == NSOrderedDescending) latestTs = ts;
+                }
+            }
+
+            NSString *dominantRID = nil;
+            NSInteger maxCount = 0;
+            for (NSString *rid in authorCounts) {
+                NSInteger c = [authorCounts[rid] integerValue];
+                if (c > maxCount) { maxCount = c; dominantRID = rid; }
+            }
+
+            NSString *label = dominantRID ? deviceLabels[dominantRID] : @"";
+            NSString *dateStr = (dominantRID && ![latestTs isEqual:[NSDate distantPast]])
+                ? [blameFmt stringFromDate:latestTs] : @"          ";
+
+            // Truncate label for alignment
+            if (label.length > maxLabelLen)
+                label = [label substringToIndex:maxLabelLen];
+
+            // Skip the attachment character (U+FFFC)
+            NSString *displayLine = line;
+            if ([displayLine rangeOfString:@"\uFFFC"].location != NSNotFound) {
+                displayLine = [displayLine stringByReplacingOccurrencesOfString:@"\uFFFC" withString:@"[attachment]"];
+            }
+
+            if (displayLine.length == 0) {
+                printf("%*s  %s |\n", (int)maxLabelLen, "", [dateStr UTF8String]);
+            } else {
+                printf("%-*s  %s | %s\n",
+                       (int)maxLabelLen, [label UTF8String],
+                       [dateStr UTF8String],
+                       [displayLine UTF8String]);
+            }
+
+            charPos += lineLen + 1; // +1 for the \n
+        }
+        return;
     }
 
     // === JSON Output ===
