@@ -187,6 +187,42 @@ void printSyncHelp(void);
 NSString *syncDefaultDir(void);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// iMessage commands (imessage.m)
+// ─────────────────────────────────────────────────────────────────────────────
+
+BOOL openMessagesDB(void);
+void closeMessagesDB(void);
+
+void cmdMsgList(NSUInteger limit, BOOL jsonOutput, NSString *service);
+void cmdMsgShow(const char *chatRef, NSUInteger limit, BOOL jsonOutput,
+                NSString *afterStr, NSString *beforeStr);
+void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput);
+void cmdMsgCount(const char *chatRef, BOOL jsonOutput);
+void cmdMsgContacts(NSUInteger limit, BOOL jsonOutput, NSString *service);
+void cmdMsgInfo(const char *chatRef, BOOL jsonOutput);
+void cmdMsgAttachments(const char *chatRef, NSUInteger limit, BOOL jsonOutput);
+int  cmdMsgSend(const char *recipient, NSString *text, NSString *service);
+int  cmdMsgAttach(const char *recipient, NSString *filePath, NSString *service);
+int  cmdMsgReact(const char *chatRef, int messageIdx, const char *reaction);
+int  cmdMsgRead(const char *chatRef);
+int  cmdMsgUnread(const char *chatRef);
+int  cmdMsgDelete(const char *chatRef);
+int  cmdMsgTyping(const char *chatRef);
+int  cmdMsgEdit(const char *msgGuid, NSString *newText);
+int  cmdMsgUnsend(const char *msgGuid);
+int  cmdMsgGroupNew(int addrCount, char *addresses[], NSString *message,
+                    NSString *service);
+int  cmdMsgGroupRename(const char *chatRef, NSString *newName);
+int  cmdMsgGroupAdd(const char *chatRef, const char *address);
+int  cmdMsgGroupRemove(const char *chatRef, const char *address);
+int  cmdMsgGroupLeave(const char *chatRef);
+void cmdMsgScheduleList(BOOL jsonOutput);
+int  cmdMsgCheck(const char *address);
+int  cmdMsgExport(const char *chatRef, NSString *outputPath, NSString *format);
+void printMsgHelp(void);
+void printMsgSubcommandHelp(const char *sub);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Help text & arg parsing (main.m)
 // ─────────────────────────────────────────────────────────────────────────────
 

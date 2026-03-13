@@ -1,11 +1,11 @@
 CC     = clang
 CFLAGS = -framework Foundation -framework CoreData \
          -Wall -Wno-deprecated-declarations \
-         -fobjc-arc
+         -fobjc-arc -lsqlite3
 TARGET = cider
 SRCDIR = src
 SRC    = $(SRCDIR)/main.m $(SRCDIR)/core.m $(SRCDIR)/notes.m \
-         $(SRCDIR)/reminders.m $(SRCDIR)/sync.m
+         $(SRCDIR)/reminders.m $(SRCDIR)/sync.m $(SRCDIR)/imessage.m
 
 .PHONY: all clean install test test-sync
 

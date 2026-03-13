@@ -20,6 +20,7 @@ void printHelp(void) {
 "  cider templates [sub]       Template management\n"
 "  cider settings [sub]        Cider configuration\n"
 "  cider rem [subcommand]      Reminders operations\n"
+"  cider msg [subcommand]      iMessage operations\n"
 "  cider sync [subcommand]     Notes <-> Markdown sync\n"
 "  cider --version             Show version\n"
 "\n"
@@ -1466,6 +1467,280 @@ static int handleRemComplete(int argc, char *argv[]) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// msg handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+static NSString *collectTextOrStdinMsg(int argc, char *argv[], int startIdx) {
+    if (startIdx < argc) {
+        NSMutableArray *parts = [NSMutableArray array];
+        for (int i = startIdx; i < argc; i++) {
+            NSString *arg = [NSString stringWithUTF8String:argv[i]];
+            if ([arg hasPrefix:@"--"]) break;
+            [parts addObject:arg];
+        }
+        if (parts.count > 0)
+            return [parts componentsJoinedByString:@" "];
+    }
+    // Try stdin
+    if (!isatty(STDIN_FILENO)) {
+        NSFileHandle *fh = [NSFileHandle fileHandleWithStandardInput];
+        NSData *data = [fh readDataToEndOfFile];
+        if (data.length > 0) {
+            NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            // Trim trailing newline
+            if ([s hasSuffix:@"\n"])
+                s = [s substringToIndex:s.length - 1];
+            return s;
+        }
+    }
+    return nil;
+}
+
+static int handleMsgList(int argc, char *argv[]) {
+    NSString *limitStr = argValue(argc, argv, 3, "--limit", "-n");
+    NSUInteger limit = limitStr ? (NSUInteger)[limitStr intValue] : 0;
+    BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+    NSString *service = argValue(argc, argv, 3, "--service", NULL);
+    cmdMsgList(limit, jsonOut, service);
+    return 0;
+}
+
+static int handleMsgShow(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg show <chat> [options]\n");
+        return 1;
+    }
+    NSString *limitStr = argValue(argc, argv, 4, "--limit", "-n");
+    NSUInteger limit = limitStr ? (NSUInteger)[limitStr intValue] : 0;
+    BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
+    NSString *afterStr = argValue(argc, argv, 4, "--after", NULL);
+    NSString *beforeStr = argValue(argc, argv, 4, "--before", NULL);
+    cmdMsgShow(argv[3], limit, jsonOut, afterStr, beforeStr);
+    return 0;
+}
+
+static int handleMsgSearch(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg search <query> [options]\n");
+        return 1;
+    }
+    NSString *query = [NSString stringWithUTF8String:argv[3]];
+    NSString *limitStr = argValue(argc, argv, 4, "--limit", "-n");
+    NSUInteger limit = limitStr ? (NSUInteger)[limitStr intValue] : 0;
+    BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
+    cmdMsgSearch(query, limit, jsonOut);
+    return 0;
+}
+
+static int handleMsgCount(int argc, char *argv[]) {
+    BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+    const char *chatRef = NULL;
+    if (argc >= 4 && argv[3][0] != '-') chatRef = argv[3];
+    cmdMsgCount(chatRef, jsonOut);
+    return 0;
+}
+
+static int handleMsgContacts(int argc, char *argv[]) {
+    NSString *limitStr = argValue(argc, argv, 3, "--limit", "-n");
+    NSUInteger limit = limitStr ? (NSUInteger)[limitStr intValue] : 0;
+    BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+    NSString *service = argValue(argc, argv, 3, "--service", NULL);
+    cmdMsgContacts(limit, jsonOut, service);
+    return 0;
+}
+
+static int handleMsgInfo(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg info <chat>\n");
+        return 1;
+    }
+    BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
+    cmdMsgInfo(argv[3], jsonOut);
+    return 0;
+}
+
+static int handleMsgAttachments(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg attachments <chat>\n");
+        return 1;
+    }
+    NSString *limitStr = argValue(argc, argv, 4, "--limit", "-n");
+    NSUInteger limit = limitStr ? (NSUInteger)[limitStr intValue] : 0;
+    BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
+    cmdMsgAttachments(argv[3], limit, jsonOut);
+    return 0;
+}
+
+static int handleMsgSend(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg send <recipient> <message>\n");
+        return 1;
+    }
+    NSString *service = argValue(argc, argv, 4, "--service", NULL);
+    NSString *text = collectTextOrStdinMsg(argc, argv, 4);
+    if (!text) {
+        fprintf(stderr, "No message provided. Provide text or pipe via stdin.\n");
+        return 1;
+    }
+    return cmdMsgSend(argv[3], text, service);
+}
+
+static int handleMsgAttachFile(int argc, char *argv[]) {
+    if (argc < 5) {
+        fprintf(stderr, "Usage: cider msg attach <recipient> <file>\n");
+        return 1;
+    }
+    NSString *service = argValue(argc, argv, 5, "--service", NULL);
+    NSString *filePath = [NSString stringWithUTF8String:argv[4]];
+    // Expand ~ in path
+    filePath = [filePath stringByExpandingTildeInPath];
+    return cmdMsgAttach(argv[3], filePath, service);
+}
+
+static int handleMsgReact(int argc, char *argv[]) {
+    if (argc < 5) {
+        fprintf(stderr, "Usage: cider msg react <chat> <msg-index> <reaction>\n"
+                        "  Reactions: love, like, dislike, laugh, emphasize, question\n");
+        return 1;
+    }
+    return cmdMsgReact(argv[3], atoi(argv[4]),
+                       argc >= 6 ? argv[5] : NULL);
+}
+
+static int handleMsgRead(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg read <chat>\n");
+        return 1;
+    }
+    return cmdMsgRead(argv[3]);
+}
+
+static int handleMsgUnread(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg unread <chat>\n");
+        return 1;
+    }
+    return cmdMsgUnread(argv[3]);
+}
+
+static int handleMsgDelete(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg delete <chat>\n");
+        return 1;
+    }
+    return cmdMsgDelete(argv[3]);
+}
+
+static int handleMsgTyping(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg typing <chat>\n");
+        return 1;
+    }
+    return cmdMsgTyping(argv[3]);
+}
+
+static int handleMsgEdit(int argc, char *argv[]) {
+    if (argc < 5) {
+        fprintf(stderr, "Usage: cider msg edit <message-guid> <new-text>\n");
+        return 1;
+    }
+    NSString *text = collectTextOrStdinMsg(argc, argv, 4);
+    return cmdMsgEdit(argv[3], text);
+}
+
+static int handleMsgUnsend(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg unsend <message-guid>\n");
+        return 1;
+    }
+    return cmdMsgUnsend(argv[3]);
+}
+
+static int handleMsgGroup(int argc, char *argv[]) {
+    if (argc < 4) {
+        printMsgSubcommandHelp("group");
+        return 1;
+    }
+    const char *action = argv[3];
+    if (strcmp(action, "new") == 0) {
+        if (argc < 5) {
+            fprintf(stderr, "Usage: cider msg group new <addr1> [addr2] ...\n");
+            return 1;
+        }
+        NSString *message = argValue(argc, argv, 4, "--message", "-m");
+        NSString *service = argValue(argc, argv, 4, "--service", NULL);
+        // Collect addresses (non-flag args after "new")
+        int addrStart = 4;
+        int addrCount = 0;
+        char *addrs[64];
+        for (int i = addrStart; i < argc && addrCount < 64; i++) {
+            if (argv[i][0] == '-') {
+                // Skip flag and its value
+                if (strcmp(argv[i], "--message") == 0 || strcmp(argv[i], "-m") == 0 ||
+                    strcmp(argv[i], "--service") == 0) {
+                    i++; // skip value
+                }
+                continue;
+            }
+            addrs[addrCount++] = argv[i];
+        }
+        return cmdMsgGroupNew(addrCount, addrs, message, service);
+    } else if (strcmp(action, "rename") == 0) {
+        if (argc < 6) {
+            fprintf(stderr, "Usage: cider msg group rename <chat> <name>\n");
+            return 1;
+        }
+        return cmdMsgGroupRename(argv[4],
+            [NSString stringWithUTF8String:argv[5]]);
+    } else if (strcmp(action, "add") == 0) {
+        if (argc < 6) {
+            fprintf(stderr, "Usage: cider msg group add <chat> <address>\n");
+            return 1;
+        }
+        return cmdMsgGroupAdd(argv[4], argv[5]);
+    } else if (strcmp(action, "remove") == 0) {
+        if (argc < 6) {
+            fprintf(stderr, "Usage: cider msg group remove <chat> <address>\n");
+            return 1;
+        }
+        return cmdMsgGroupRemove(argv[4], argv[5]);
+    } else if (strcmp(action, "leave") == 0) {
+        if (argc < 5) {
+            fprintf(stderr, "Usage: cider msg group leave <chat>\n");
+            return 1;
+        }
+        return cmdMsgGroupLeave(argv[4]);
+    } else {
+        fprintf(stderr, "Unknown group action: %s\n", action);
+        printMsgSubcommandHelp("group");
+        return 1;
+    }
+}
+
+static int handleMsgSchedule(int argc, char *argv[]) {
+    BOOL jsonOut = argHasFlag(argc, argv, 3, "--json", NULL);
+    cmdMsgScheduleList(jsonOut);
+    return 0;
+}
+
+static int handleMsgCheck(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg check <address>\n");
+        return 1;
+    }
+    return cmdMsgCheck(argv[3]);
+}
+
+static int handleMsgExport(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg export <chat> [-o path]\n");
+        return 1;
+    }
+    NSString *output = argValue(argc, argv, 4, "-o", "--output");
+    return cmdMsgExport(argv[3], output, nil);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Command table
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1599,6 +1874,48 @@ static const CiderCommand g_commands[] = {
     {"rem", "-e",            NULL,       NULL, NULL, handleRemEdit},
     {"rem", "-d",            NULL,       NULL, NULL, handleRemDelete},
     {"rem", "-c",            NULL,       NULL, NULL, handleRemComplete},
+
+    // ── msg (iMessage) ───────────────────────────────────────────────────────
+    {"msg", "list",          NULL,       "List conversations",
+     "--limit -n --service --json", handleMsgList},
+    {"msg", "show",          NULL,       "View messages in a chat",
+     "--limit -n --after --before --json", handleMsgShow},
+    {"msg", "search",        NULL,       "Search all messages",
+     "--limit -n --json", handleMsgSearch},
+    {"msg", "send",          NULL,       "Send a text message",
+     "--service", handleMsgSend},
+    {"msg", "attach",        NULL,       "Send a file attachment",
+     "--service", handleMsgAttachFile},
+    {"msg", "info",          NULL,       "Chat details & participants",
+     "--json", handleMsgInfo},
+    {"msg", "count",         NULL,       "Message statistics",
+     "--json", handleMsgCount},
+    {"msg", "contacts",      NULL,       "List contacts/handles",
+     "--limit -n --service --json", handleMsgContacts},
+    {"msg", "attachments",   NULL,       "List attachments in a chat",
+     "--limit -n --json", handleMsgAttachments},
+    {"msg", "export",        NULL,       "Export conversation to file",
+     "-o --output", handleMsgExport},
+    {"msg", "schedule",      NULL,       "List scheduled messages",
+     "--json", handleMsgSchedule},
+    {"msg", "check",         NULL,       "Check address in history",
+     NULL, handleMsgCheck},
+    {"msg", "react",         NULL,       "Send tapback (Private API)",
+     NULL, handleMsgReact},
+    {"msg", "read",          NULL,       "Mark chat as read (Private API)",
+     NULL, handleMsgRead},
+    {"msg", "unread",        NULL,       "Mark chat unread (Private API)",
+     NULL, handleMsgUnread},
+    {"msg", "delete",        NULL,       "Delete a chat (Private API)",
+     NULL, handleMsgDelete},
+    {"msg", "typing",        NULL,       "Typing indicator (Private API)",
+     NULL, handleMsgTyping},
+    {"msg", "edit",          NULL,       "Edit a message (Private API)",
+     NULL, handleMsgEdit},
+    {"msg", "unsend",        NULL,       "Unsend a message (Private API)",
+     NULL, handleMsgUnsend},
+    {"msg", "group",         NULL,       "Group chat operations",
+     NULL, handleMsgGroup},
 };
 
 static const size_t g_numCommands = sizeof(g_commands) / sizeof(g_commands[0]);
@@ -1631,6 +1948,7 @@ static void printCompletionsZsh(void) {
     printf("    'settings:Cider configuration'\n");
     printf("    'rem:Reminders operations'\n");
     printf("    'sync:Notes <-> Markdown sync'\n");
+    printf("    'msg:iMessage operations'\n");
     printf("  )\n\n");
     printf("  if (( CURRENT == 2 )); then\n");
     printf("    _describe 'command' top_commands\n");
@@ -1638,8 +1956,8 @@ static void printCompletionsZsh(void) {
     printf("  fi\n\n");
 
     // Generate per-parent subcommand completions
-    const char *parents[] = {"notes", "templates", "settings", "sync", "rem"};
-    for (int p = 0; p < 5; p++) {
+    const char *parents[] = {"notes", "templates", "settings", "sync", "rem", "msg"};
+    for (int p = 0; p < 6; p++) {
         printf("  if [[ $words[2] == '%s' ]]; then\n", parents[p]);
         printf("    if (( CURRENT == 3 )); then\n");
         printf("      local -a subcmds\n");
@@ -1686,12 +2004,12 @@ static void printCompletionsBash(void) {
     printf("  local cur prev words cword\n");
     printf("  _init_completion || return\n\n");
     printf("  if [[ $cword -eq 1 ]]; then\n");
-    printf("    COMPREPLY=($(compgen -W 'notes templates settings rem sync --version --help' -- \"$cur\"))\n");
+    printf("    COMPREPLY=($(compgen -W 'notes templates settings rem sync msg --version --help' -- \"$cur\"))\n");
     printf("    return\n");
     printf("  fi\n\n");
 
-    const char *parents[] = {"notes", "templates", "settings", "sync", "rem"};
-    for (int p = 0; p < 5; p++) {
+    const char *parents[] = {"notes", "templates", "settings", "sync", "rem", "msg"};
+    for (int p = 0; p < 6; p++) {
         printf("  if [[ ${words[1]} == '%s' ]]; then\n", parents[p]);
         printf("    if [[ $cword -eq 2 ]]; then\n");
         printf("      local subcmds='");
@@ -1876,6 +2194,44 @@ int main(int argc, char *argv[]) {
             if (!entry) {
                 fprintf(stderr, "Unknown sync subcommand: %s\n", argv[2]);
                 printSyncHelp();
+                return 1;
+            }
+            return entry->handler(argc, argv);
+        }
+
+        // ── msg (iMessage) ───────────────────────────────────────────────────
+        if ([cmd isEqualToString:@"msg"]) {
+            if (argc >= 3 && (strcmp(argv[2], "--help") == 0 ||
+                               strcmp(argv[2], "-h") == 0)) {
+                printMsgHelp();
+                return 0;
+            }
+
+            if (argc == 2) {
+                cmdMsgList(0, NO, nil);
+                return 0;
+            }
+
+            NSString *sub = [NSString stringWithUTF8String:argv[2]];
+
+            // Per-subcommand help
+            if (argc >= 4 && (strcmp(argv[3], "--help") == 0 ||
+                               strcmp(argv[3], "-h") == 0)) {
+                printMsgSubcommandHelp([sub UTF8String]);
+                return 0;
+            }
+
+            // Bare number → show chat
+            if ([sub intValue] > 0 && [sub isEqualToString:
+                [NSString stringWithFormat:@"%d", [sub intValue]]]) {
+                cmdMsgShow([sub UTF8String], 0, NO, nil, nil);
+                return 0;
+            }
+
+            const CiderCommand *entry = findCommand("msg", [sub UTF8String]);
+            if (!entry) {
+                fprintf(stderr, "Unknown msg subcommand: %s\n", argv[2]);
+                printMsgHelp();
                 return 1;
             }
             return entry->handler(argc, argv);
