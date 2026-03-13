@@ -5,6 +5,8 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -41,16 +43,13 @@ jobs:
           ./cider notes replace 99999 --find x --replace y 2>/dev/null && exit 1 || true
           echo "All error handling tests passed"
 
-  # Full integration tests require a real Notes database.
-  # Uncomment and use a self-hosted runner when available.
-  # integration:
-  #   name: Integration Tests
-  #   runs-on: self-hosted
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Build
-  #       run: make
-  #     - name: Run tests
-  #       run: make test
-  #     - name: Run sync tests
-  #       run: make test-sync
+  integration:
+    name: Integration Tests
+    runs-on: self-hosted
+    if: github.event_name == 'release' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make
+      - name: Run tests
+        run: make test

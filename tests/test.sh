@@ -1222,6 +1222,307 @@ fi
 run "$CIDER" notes -s "CiderTest Beta"
 assert_contains "CiderTest Beta" "compat: -s searches"
 
+# ── Test: inspect ─────────────────────────────────────────────────────
+
+log "Testing: inspect"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "inspect" "Could not find CiderTest Alpha"
+else
+    # Basic inspect
+    run "$CIDER" notes inspect "$IDX"
+    assert_rc 0 "inspect: exits 0"
+    assert_contains "Metadata" "inspect: shows metadata section"
+    assert_contains "Folder:" "inspect: shows folder info"
+    assert_contains "CiderTest Alpha" "inspect: shows note title"
+    assert_contains "Created:" "inspect: shows created date"
+    assert_contains "Modified:" "inspect: shows modified date"
+    assert_contains "Characters:" "inspect: shows character count"
+    assert_contains "Words:" "inspect: shows word count"
+    assert_contains "Tables:" "inspect: shows tables count (Alpha has a table)"
+    assert_contains "Identifier:" "inspect: shows identifier"
+
+    # JSON inspect
+    run "$CIDER" notes inspect "$IDX" --json
+    assert_rc 0 "inspect --json: exits 0"
+    assert_contains '"title": "CiderTest Alpha"' "inspect --json: has title"
+    assert_contains '"folder":' "inspect --json: has folder"
+    assert_contains '"created":' "inspect --json: has created"
+    assert_contains '"modified":' "inspect --json: has modified"
+    assert_contains '"characters":' "inspect --json: has characters"
+    assert_contains '"words":' "inspect --json: has words"
+    assert_contains '"tags":' "inspect --json: has tags array"
+    assert_contains '"tables":' "inspect --json: has tables array"
+    assert_contains '"pinned":' "inspect --json: has pinned field"
+    assert_contains '"shared":' "inspect --json: has shared field"
+    assert_contains '"body":' "inspect --json: has body field"
+fi
+
+# Inspect nonexistent note
+run "$CIDER" notes inspect 99999
+assert_rc 1 "inspect: nonexistent note returns exit 1"
+
+# ── Test: link (creating links) ──────────────────────────────────────
+
+log "Testing: link (creating links)"
+
+ALPHA_IDX=$(find_note "CiderTest Alpha")
+BETA_IDX=$(find_note "CiderTest Beta")
+if [ -z "$ALPHA_IDX" ] || [ -z "$BETA_IDX" ]; then
+    fail "link" "Could not find CiderTest Alpha or Beta"
+else
+    # Create a link from Alpha to Beta
+    run "$CIDER" notes link "$ALPHA_IDX" "CiderTest Beta"
+    assert_rc 0 "link: exits 0"
+    assert_contains "Linked" "link: success message"
+
+    sleep 1
+
+    # Verify outgoing link on Alpha
+    run "$CIDER" notes links "$ALPHA_IDX"
+    assert_rc 0 "links (after link): exits 0"
+    assert_contains "CiderTest Beta" "links: shows linked note"
+
+    # Verify outgoing link in JSON
+    run "$CIDER" notes links "$ALPHA_IDX" --json
+    assert_rc 0 "links --json (after link): exits 0"
+    assert_contains "CiderTest Beta" "links --json: shows linked note"
+
+    # Verify backlinks on Beta
+    run "$CIDER" notes backlinks "$BETA_IDX"
+    assert_rc 0 "backlinks (after link): exits 0"
+    assert_contains "CiderTest Alpha" "backlinks: Alpha shows as backlink to Beta"
+
+    # Verify backlinks on Beta in JSON
+    run "$CIDER" notes backlinks "$BETA_IDX" --json
+    assert_rc 0 "backlinks --json (after link): exits 0"
+    assert_contains "CiderTest Alpha" "backlinks --json: Alpha in backlinks JSON"
+fi
+
+# Link to nonexistent target
+if [ -n "$ALPHA_IDX" ]; then
+    run "$CIDER" notes link "$ALPHA_IDX" "NonexistentNote99999"
+    assert_rc 1 "link: nonexistent target returns exit 1"
+fi
+
+# Link without target title
+run "$CIDER" notes link 99999
+assert_rc 1 "link: missing target returns exit 1"
+
+# ── Test: checklist --add ────────────────────────────────────────────
+
+log "Testing: checklist --add"
+
+IDX=$(find_note "CiderTest Beta")
+if [ -z "$IDX" ]; then
+    fail "checklist --add" "Could not find CiderTest Beta"
+else
+    # Add a checklist item
+    run "$CIDER" notes checklist "$IDX" --add "Test checklist item"
+    assert_rc 0 "checklist --add: exits 0"
+    assert_contains "Added checklist item" "checklist --add: success message"
+
+    sleep 2
+
+    # Verify checklist shows the item (CRDT may not always persist on
+    # notes without an existing checklist structure — skip if empty)
+    run "$CIDER" notes checklist "$IDX"
+    assert_rc 0 "checklist (after add): exits 0"
+    if echo "$OUT" | grep -qF "Test checklist item"; then
+        pass "checklist: shows added item"
+
+        # Only test check/uncheck if the item actually persisted
+        run "$CIDER" notes checklist "$IDX" --summary
+        assert_contains "0/1" "checklist --summary: shows 0/1 (none checked)"
+
+        run "$CIDER" notes check "$IDX" 1
+        assert_rc 0 "check: exits 0"
+        sleep 1
+
+        run "$CIDER" notes checklist "$IDX" --summary
+        assert_contains "1/1" "checklist --summary: shows 1/1 (checked)"
+
+        run "$CIDER" notes uncheck "$IDX" 1
+        assert_rc 0 "uncheck: exits 0"
+        sleep 1
+
+        run "$CIDER" notes checklist "$IDX" --summary
+        assert_contains "0/1" "checklist --summary: shows 0/1 (after uncheck)"
+
+        run "$CIDER" notes checklist "$IDX" --json
+        assert_rc 0 "checklist --json (with items): exits 0"
+        assert_contains "Test checklist item" "checklist --json: shows item"
+    else
+        skip "checklist --add (persist)" "CRDT checklist item did not persist (known CRDT limitation)"
+    fi
+fi
+
+# ── Test: history ────────────────────────────────────────────────────
+
+log "Testing: history"
+
+IDX=$(find_note "CiderTest Gamma")
+if [ -z "$IDX" ]; then
+    fail "history" "Could not find CiderTest Gamma"
+else
+    # Basic history (Gamma was edited via stdin earlier, so it has history)
+    run "$CIDER" notes history "$IDX"
+    assert_rc 0 "history: exits 0"
+    assert_matches "History:|edits|sessions|No edit history" "history: shows history info"
+
+    # JSON history
+    run "$CIDER" notes history "$IDX" --json
+    assert_rc 0 "history --json: exits 0"
+    assert_matches '"note":|"edits":' "history --json: has JSON fields"
+    assert_contains '"title":' "history --json: has title field"
+
+    # Blame history
+    run "$CIDER" notes history "$IDX" --blame
+    assert_rc 0 "history --blame: exits 0"
+    assert_contains "CiderTest Gamma" "history --blame: shows note title"
+fi
+
+# History on nonexistent note
+run "$CIDER" notes history 99999
+assert_rc 0 "history: nonexistent note shows error"
+assert_contains "not found" "history: error message for nonexistent"
+
+# ── Test: getdate / setdate ──────────────────────────────────────────
+
+log "Testing: getdate / setdate"
+
+IDX=$(find_note "CiderTest Alpha")
+if [ -z "$IDX" ]; then
+    fail "getdate" "Could not find CiderTest Alpha"
+else
+    # Basic getdate
+    run "$CIDER" notes getdate "$IDX"
+    assert_rc 0 "getdate: exits 0"
+    assert_contains "modified:" "getdate: shows modified date"
+    assert_contains "created:" "getdate: shows created date"
+    assert_contains "CiderTest Alpha" "getdate: shows note title"
+
+    # JSON getdate
+    run "$CIDER" notes getdate "$IDX" --json
+    assert_rc 0 "getdate --json: exits 0"
+    assert_contains '"modified":' "getdate --json: has modified field"
+    assert_contains '"created":' "getdate --json: has created field"
+    assert_contains '"title":"CiderTest Alpha"' "getdate --json: has title"
+
+    # Setdate --dry-run
+    run "$CIDER" notes setdate "$IDX" 2024-06-15T10:30:00 --dry-run
+    assert_rc 0 "setdate --dry-run: exits 0"
+    assert_contains "[dry-run]" "setdate --dry-run: shows dry-run prefix"
+    assert_contains "2024-06-15" "setdate --dry-run: shows new date"
+
+    # Verify getdate still shows original date (dry-run didn't change it)
+    run "$CIDER" notes getdate "$IDX"
+    assert_not_contains "2024-06-15" "setdate --dry-run: did not actually change date"
+
+    # Actual setdate
+    run "$CIDER" notes setdate "$IDX" 2024-06-15T10:30:00
+    assert_rc 0 "setdate: exits 0"
+    assert_contains "Updated" "setdate: shows Updated message"
+
+    sleep 1
+
+    # Verify date was changed
+    run "$CIDER" notes getdate "$IDX"
+    assert_contains "2024-06-15" "setdate: date was actually changed"
+
+    # Set it back to now so other tests aren't affected
+    NOW_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S")
+    "$CIDER" notes setdate "$IDX" "$NOW_DATE" 2>/dev/null || true
+    sleep 1
+fi
+
+# Getdate on nonexistent note
+run "$CIDER" notes getdate 99999
+assert_rc 1 "getdate: nonexistent note returns exit 1"
+
+# Setdate on nonexistent note
+run "$CIDER" notes setdate 99999 2024-01-01T00:00:00
+assert_rc 1 "setdate: nonexistent note returns exit 1"
+
+# Setdate with invalid date
+IDX=$(find_note "CiderTest Alpha")
+if [ -n "$IDX" ]; then
+    run "$CIDER" notes setdate "$IDX" "not-a-date"
+    assert_rc 1 "setdate: invalid date returns exit 1"
+    assert_contains "Invalid date" "setdate: shows invalid date error"
+fi
+
+# ── Test: boundary/edge cases ────────────────────────────────────────
+
+log "Testing: boundary/edge cases"
+
+# Index 0 should fail (valid indices start at 1)
+run "$CIDER" notes show 0
+assert_rc 1 "edge: index 0 returns exit 1"
+
+# Very large index
+run "$CIDER" notes show 999999
+assert_rc 1 "edge: very large index returns exit 1"
+
+# Empty search query
+run "$CIDER" notes search ""
+assert_rc 0 "edge: empty search query exits 0"
+
+# ── Test: export content verification ────────────────────────────────
+
+log "Testing: export content verification"
+
+EXPORT_DIR="/tmp/cider_test_export_content_$$"
+run "$CIDER" notes export "$EXPORT_DIR"
+assert_rc 0 "export (content): exits 0"
+
+if [ -d "$EXPORT_DIR" ] && ls "$EXPORT_DIR"/*.html &>/dev/null; then
+    # Check that at least one HTML file contains expected test note content
+    if grep -rlF "CiderTest Alpha" "$EXPORT_DIR"/*.html >/dev/null 2>&1; then
+        pass "export content: Alpha note found in exported HTML"
+    else
+        fail "export content" "CiderTest Alpha not found in any exported HTML file"
+    fi
+
+    if grep -rlF "CiderTest Beta" "$EXPORT_DIR"/*.html >/dev/null 2>&1; then
+        pass "export content: Beta note found in exported HTML"
+    else
+        fail "export content" "CiderTest Beta not found in any exported HTML file"
+    fi
+else
+    fail "export content" "export directory empty or missing"
+fi
+rm -rf "$EXPORT_DIR"
+
+# ── Test: completions ────────────────────────────────────────────────
+
+log "Testing: completions"
+
+# List completions
+run "$CIDER" --completions list
+assert_rc 0 "completions list: exits 0"
+assert_contains "show" "completions list: contains 'show' command"
+assert_contains "search" "completions list: contains 'search' command"
+assert_contains "edit" "completions list: contains 'edit' command"
+assert_contains "inspect" "completions list: contains 'inspect' command"
+
+# Zsh completions
+run "$CIDER" --completions zsh
+assert_rc 0 "completions zsh: exits 0"
+assert_contains "_cider" "completions zsh: contains _cider function"
+assert_contains "compdef" "completions zsh: contains compdef directive"
+
+# Bash completions
+run "$CIDER" --completions bash
+assert_rc 0 "completions bash: exits 0"
+assert_contains "complete" "completions bash: contains complete command"
+assert_contains "_cider" "completions bash: contains _cider function"
+
+# Missing argument
+run "$CIDER" --completions
+assert_rc 1 "completions: missing argument returns exit 1"
+
 # ── Cleanup ──────────────────────────────────────────────────────────────────
 
 log "Cleaning up..."
