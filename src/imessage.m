@@ -312,7 +312,7 @@ void cmdMsgList(NSUInteger limit, BOOL jsonOutput, NSString *service) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void cmdMsgShow(const char *chatRef, NSUInteger limit, BOOL jsonOutput,
-                NSString *afterStr, NSString *beforeStr) {
+                NSString *afterStr, NSString *beforeStr, BOOL sortAsc) {
     if (!openMessagesDB()) return;
 
     NSString *chatGUID = resolveChatGUID(chatRef);
@@ -352,7 +352,7 @@ void cmdMsgShow(const char *chatRef, NSUInteger limit, BOOL jsonOutput,
         }
     }
 
-    [sql appendString:@"ORDER BY m.date DESC "];
+    [sql appendFormat:@"ORDER BY m.date %s ", sortAsc ? "ASC" : "DESC"];
 
     if (limit > 0) {
         [sql appendFormat:@"LIMIT %lu", (unsigned long)limit];
@@ -432,8 +432,9 @@ void cmdMsgShow(const char *chatRef, NSUInteger limit, BOOL jsonOutput,
     }
     sqlite3_finalize(stmt);
 
-    // Reverse to chronological order
-    NSArray *chrono = [[messages reverseObjectEnumerator] allObjects];
+    // When DESC (default), reverse for chronological display
+    NSArray *chrono = sortAsc ? messages :
+        [[messages reverseObjectEnumerator] allObjects];
 
     if (jsonOutput) {
         printf("[\n");
@@ -563,13 +564,275 @@ void cmdMsgShow(const char *chatRef, NSUInteger limit, BOOL jsonOutput,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// msg context — show messages around a specific message in its conversation
+// ─────────────────────────────────────────────────────────────────────────────
+
+void cmdMsgContext(const char *msgGuid, NSUInteger context, BOOL jsonOutput,
+                   const char *direction) {
+    if (!openMessagesDB()) return;
+
+    if (!context) context = 10;
+
+    // 1. Find the target message's ROWID and its chat
+    //    Accepts full GUID or partial (prefix match, min 8 chars)
+    NSString *guidStr = [NSString stringWithUTF8String:msgGuid];
+    const char *lookupSql;
+    if ([guidStr length] < 36) {
+        // Partial GUID — prefix match
+        lookupSql =
+            "SELECT m.ROWID, m.date, c.guid as chat_guid, c.chat_identifier, "
+            "c.display_name, c.service_name "
+            "FROM message m "
+            "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+            "JOIN chat c ON c.ROWID = cmj.chat_id "
+            "WHERE m.guid LIKE ? LIMIT 1";
+    } else {
+        lookupSql =
+            "SELECT m.ROWID, m.date, c.guid as chat_guid, c.chat_identifier, "
+            "c.display_name, c.service_name "
+            "FROM message m "
+            "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+            "JOIN chat c ON c.ROWID = cmj.chat_id "
+            "WHERE m.guid = ?";
+    }
+
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(g_msgDB, lookupSql, -1, &stmt, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Query failed: %s\n", sqlite3_errmsg(g_msgDB));
+        return;
+    }
+    if ([guidStr length] < 36) {
+        NSString *pattern = [NSString stringWithFormat:@"%@%%", guidStr];
+        sqlite3_bind_text(stmt, 1, [pattern UTF8String], -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_text(stmt, 1, msgGuid, -1, SQLITE_STATIC);
+    }
+
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        fprintf(stderr, "Message not found: %s\n", msgGuid);
+        sqlite3_finalize(stmt);
+        return;
+    }
+
+    int64_t targetRowid = sqlite3_column_int64(stmt, 0);
+    int64_t targetDate = sqlite3_column_int64(stmt, 1);
+    NSString *chatGuid = [NSString stringWithUTF8String:
+        (const char *)sqlite3_column_text(stmt, 2)];
+    const char *_chatIdent = (const char *)sqlite3_column_text(stmt, 3);
+    const char *_displayName = (const char *)sqlite3_column_text(stmt, 4);
+    NSString *chatName = (_displayName && strlen(_displayName) > 0) ?
+        [NSString stringWithUTF8String:_displayName] :
+        (_chatIdent ? [NSString stringWithUTF8String:_chatIdent] : chatGuid);
+    sqlite3_finalize(stmt);
+
+    // 2. Build query based on direction
+    //    "before" = older messages, "after" = newer messages, default = both
+    NSString *sql;
+    BOOL showBefore = !direction || strcmp(direction, "before") == 0;
+    BOOL showAfter = !direction || strcmp(direction, "after") == 0;
+
+    if (direction && strcmp(direction, "before") == 0) {
+        // Only older messages
+        sql = [NSString stringWithFormat:
+            @"SELECT m.ROWID, m.guid, m.text, m.date, m.is_from_me, "
+            @"m.cache_has_attachments, m.associated_message_type, "
+            @"m.date_edited, m.date_retracted, m.item_type, "
+            @"m.group_title, m.associated_message_emoji, "
+            @"h.id as handle_address "
+            @"FROM message m "
+            @"JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+            @"JOIN chat c ON c.ROWID = cmj.chat_id "
+            @"LEFT JOIN handle h ON h.ROWID = m.handle_id "
+            @"WHERE c.guid = ? AND m.date < %lld "
+            @"ORDER BY m.date DESC LIMIT %lu",
+            targetDate, (unsigned long)context];
+    } else if (direction && strcmp(direction, "after") == 0) {
+        // Only newer messages
+        sql = [NSString stringWithFormat:
+            @"SELECT m.ROWID, m.guid, m.text, m.date, m.is_from_me, "
+            @"m.cache_has_attachments, m.associated_message_type, "
+            @"m.date_edited, m.date_retracted, m.item_type, "
+            @"m.group_title, m.associated_message_emoji, "
+            @"h.id as handle_address "
+            @"FROM message m "
+            @"JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+            @"JOIN chat c ON c.ROWID = cmj.chat_id "
+            @"LEFT JOIN handle h ON h.ROWID = m.handle_id "
+            @"WHERE c.guid = ? AND m.date > %lld "
+            @"ORDER BY m.date ASC LIMIT %lu",
+            targetDate, (unsigned long)context];
+    } else {
+        // Both directions — union of before + target + after
+        sql = [NSString stringWithFormat:
+            @"SELECT * FROM ("
+            @"  SELECT m.ROWID, m.guid, m.text, m.date, m.is_from_me, "
+            @"  m.cache_has_attachments, m.associated_message_type, "
+            @"  m.date_edited, m.date_retracted, m.item_type, "
+            @"  m.group_title, m.associated_message_emoji, "
+            @"  h.id as handle_address "
+            @"  FROM message m "
+            @"  JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+            @"  JOIN chat c ON c.ROWID = cmj.chat_id "
+            @"  LEFT JOIN handle h ON h.ROWID = m.handle_id "
+            @"  WHERE c.guid = ? AND m.date <= %lld "
+            @"  ORDER BY m.date DESC LIMIT %lu"
+            @") "
+            @"UNION ALL "
+            @"SELECT * FROM ("
+            @"  SELECT m.ROWID, m.guid, m.text, m.date, m.is_from_me, "
+            @"  m.cache_has_attachments, m.associated_message_type, "
+            @"  m.date_edited, m.date_retracted, m.item_type, "
+            @"  m.group_title, m.associated_message_emoji, "
+            @"  h.id as handle_address "
+            @"  FROM message m "
+            @"  JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+            @"  JOIN chat c ON c.ROWID = cmj.chat_id "
+            @"  LEFT JOIN handle h ON h.ROWID = m.handle_id "
+            @"  WHERE c.guid = ? AND m.date > %lld "
+            @"  ORDER BY m.date ASC LIMIT %lu"
+            @") ORDER BY date ASC",
+            targetDate, (unsigned long)(context + 1),
+            targetDate, (unsigned long)context];
+    }
+
+    if (sqlite3_prepare_v2(g_msgDB, [sql UTF8String], -1, &stmt, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Query failed: %s\n", sqlite3_errmsg(g_msgDB));
+        return;
+    }
+
+    // Bind chat_guid — once for single-direction, twice for both
+    sqlite3_bind_text(stmt, 1, [chatGuid UTF8String], -1, SQLITE_STATIC);
+    if (!direction) {
+        sqlite3_bind_text(stmt, 2, [chatGuid UTF8String], -1, SQLITE_STATIC);
+    }
+
+    // Collect results
+    NSMutableArray *rows = [NSMutableArray array];
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        NSMutableDictionary *r = [NSMutableDictionary dictionary];
+        int64_t rowid = sqlite3_column_int64(stmt, 0);
+        const char *guid = (const char *)sqlite3_column_text(stmt, 1);
+        const char *text = (const char *)sqlite3_column_text(stmt, 2);
+        int64_t date = sqlite3_column_int64(stmt, 3);
+        int isFromMe = sqlite3_column_int(stmt, 4);
+        int hasAttach = sqlite3_column_int(stmt, 5);
+        int assocType = sqlite3_column_int(stmt, 6);
+        int64_t dateEdited = sqlite3_column_int64(stmt, 7);
+        int64_t dateRetracted = sqlite3_column_int64(stmt, 8);
+        int itemType = sqlite3_column_int(stmt, 9);
+        const char *groupTitle = (const char *)sqlite3_column_text(stmt, 10);
+        const char *emoji = (const char *)sqlite3_column_text(stmt, 11);
+        const char *handle = (const char *)sqlite3_column_text(stmt, 12);
+
+        r[@"rowid"] = @(rowid);
+        if (guid) r[@"guid"] = [NSString stringWithUTF8String:guid];
+        if (text) r[@"text"] = [NSString stringWithUTF8String:text];
+        r[@"date"] = dateFromChatDB(date) ?: [NSNull null];
+        r[@"is_from_me"] = @(isFromMe);
+        r[@"has_attachments"] = @(hasAttach);
+        r[@"associated_message_type"] = @(assocType);
+        r[@"date_edited"] = dateFromChatDB(dateEdited) ?: [NSNull null];
+        r[@"date_retracted"] = dateFromChatDB(dateRetracted) ?: [NSNull null];
+        r[@"item_type"] = @(itemType);
+        if (groupTitle) r[@"group_title"] = [NSString stringWithUTF8String:groupTitle];
+        if (emoji) r[@"associated_emoji"] = [NSString stringWithUTF8String:emoji];
+        if (handle) r[@"sender"] = [NSString stringWithUTF8String:handle];
+        r[@"is_target"] = @(rowid == targetRowid);
+
+        [rows addObject:r];
+    }
+    sqlite3_finalize(stmt);
+
+    // Sort by date for display (before-only results come in DESC)
+    if (direction && strcmp(direction, "before") == 0) {
+        rows = [[[[rows reverseObjectEnumerator] allObjects] mutableCopy] mutableCopy];
+    }
+
+    if (jsonOutput) {
+        printf("{\n");
+        printf("  \"chat\": \"%s\",\n", [jsonEscapeString(chatGuid) UTF8String]);
+        printf("  \"chat_name\": \"%s\",\n", [jsonEscapeString(chatName) UTF8String]);
+        printf("  \"target_guid\": \"%s\",\n", msgGuid);
+        printf("  \"messages\": [\n");
+        for (NSUInteger i = 0; i < rows.count; i++) {
+            NSDictionary *r = rows[i];
+            if (i > 0) printf(",\n");
+            NSDate *d = r[@"date"];
+            printf("    {\n");
+            printf("      \"guid\": \"%s\",\n",
+                   [jsonEscapeString(r[@"guid"] ?: @"") UTF8String]);
+            printf("      \"text\": \"%s\",\n",
+                   [jsonEscapeString(r[@"text"] ?: @"") UTF8String]);
+            printf("      \"date\": \"%s\",\n",
+                   (d && ![d isEqual:[NSNull null]]) ? [isoDateString(d) UTF8String] : "");
+            printf("      \"is_from_me\": %s,\n",
+                   [r[@"is_from_me"] boolValue] ? "true" : "false");
+            printf("      \"sender\": \"%s\",\n",
+                   [jsonEscapeString(r[@"sender"] ?: @"Me") UTF8String]);
+            printf("      \"is_target\": %s\n",
+                   [r[@"is_target"] boolValue] ? "true" : "false");
+            printf("    }");
+        }
+        printf("\n  ]\n");
+        printf("}\n");
+    } else {
+        printf("Chat: %s\n", [chatName UTF8String]);
+        if (showBefore && rows.count > 0) {
+            NSDictionary *first = rows[0];
+            printf("  ↑ use --before for older messages (guid: %s)\n",
+                   [first[@"guid"] UTF8String]);
+        }
+        printf("\n");
+
+        for (NSDictionary *r in rows) {
+            BOOL isTarget = [r[@"is_target"] boolValue];
+            int assocType = [r[@"associated_message_type"] intValue];
+            int itemType = [r[@"item_type"] intValue];
+
+            // Skip system/group events for brevity
+            if (itemType == 1 || itemType == 3) continue;
+
+            // Skip tapbacks
+            if (assocType >= 2000 && assocType < 4000) continue;
+
+            BOOL fromMe = [r[@"is_from_me"] boolValue];
+            NSDate *d = r[@"date"];
+            NSString *text = r[@"text"] ?: @"";
+            NSString *sender = fromMe ? @"You" : (r[@"sender"] ?: @"?");
+            BOOL hasAttach = [r[@"has_attachments"] boolValue];
+            BOOL retracted = r[@"date_retracted"] && ![r[@"date_retracted"] isEqual:[NSNull null]];
+            BOOL edited = r[@"date_edited"] && ![r[@"date_edited"] isEqual:[NSNull null]];
+
+            if (retracted) text = @"(unsent)";
+
+            printf("%s  [%s] %s: %s%s%s\n",
+                   isTarget ? ">>>" : "   ",
+                   (d && ![d isEqual:[NSNull null]]) ?
+                       [formatMsgDateShort(d) UTF8String] : "",
+                   [sender UTF8String],
+                   [text UTF8String],
+                   hasAttach ? " 📎" : "",
+                   edited ? " (edited)" : "");
+        }
+
+        printf("\n");
+        if (showAfter && rows.count > 0) {
+            NSDictionary *last = rows[rows.count - 1];
+            printf("  ↓ use --after for newer messages (guid: %s)\n",
+                   [last[@"guid"] UTF8String]);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // msg search — search messages
 // ─────────────────────────────────────────────────────────────────────────────
 
-void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput) {
+void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput,
+                  BOOL sortAsc, BOOL fzfOutput) {
     if (!openMessagesDB()) return;
 
-    NSString *sql =
+    NSString *sql = [NSString stringWithFormat:
         @"SELECT m.ROWID, m.guid, m.text, m.date, m.is_from_me, "
         @"h.id as handle_address, c.guid as chat_guid, "
         @"c.chat_identifier, c.display_name, c.service_name "
@@ -578,8 +841,8 @@ void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput) {
         @"JOIN chat c ON c.ROWID = cmj.chat_id "
         @"LEFT JOIN handle h ON h.ROWID = m.handle_id "
         @"WHERE m.text LIKE ? "
-        @"ORDER BY m.date DESC "
-        @"LIMIT ?";
+        @"ORDER BY m.date %@ "
+        @"LIMIT ?", sortAsc ? @"ASC" : @"DESC"];
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(g_msgDB, [sql UTF8String], -1, &stmt, NULL) != SQLITE_OK) {
@@ -590,6 +853,41 @@ void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput) {
     NSString *pattern = [NSString stringWithFormat:@"%%%@%%", query];
     sqlite3_bind_text(stmt, 1, [pattern UTF8String], -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, 2, limit > 0 ? (int)limit : 50);
+
+    if (fzfOutput) {
+        // Tab-delimited: GUID<tab>display line
+        // Pipe to fzf, then: cut -f1 to get the GUID
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *guid = (const char *)sqlite3_column_text(stmt, 1);
+            const char *text = (const char *)sqlite3_column_text(stmt, 2);
+            int64_t date = sqlite3_column_int64(stmt, 3);
+            int isFromMe = sqlite3_column_int(stmt, 4);
+            const char *handle = (const char *)sqlite3_column_text(stmt, 5);
+            const char *chatIdent = (const char *)sqlite3_column_text(stmt, 7);
+            const char *displayName = (const char *)sqlite3_column_text(stmt, 8);
+
+            NSDate *d = dateFromChatDB(date);
+            NSString *sender = isFromMe ? @"You" :
+                (handle ? [NSString stringWithUTF8String:handle] : @"?");
+            NSString *chatName = (displayName && strlen(displayName) > 0) ?
+                [NSString stringWithUTF8String:displayName] :
+                (chatIdent ? [NSString stringWithUTF8String:chatIdent] : @"?");
+            NSString *msgText = text ?
+                [NSString stringWithUTF8String:text] : @"(no text)";
+            msgText = [msgText stringByReplacingOccurrencesOfString:@"\n"
+                                                        withString:@" "];
+            msgText = truncStr(msgText, 80);
+
+            printf("%s\t[%s] %s → %s: %s\n",
+                   guid ?: "",
+                   [formatMsgDateShort(d) UTF8String],
+                   [truncStr(chatName, 20) UTF8String],
+                   [truncStr(sender, 15) UTF8String],
+                   [msgText UTF8String]);
+        }
+        sqlite3_finalize(stmt);
+        return;
+    }
 
     if (jsonOutput) {
         printf("[\n");
@@ -627,6 +925,7 @@ void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput) {
     } else {
         int idx = 0;
         while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *guid = (const char *)sqlite3_column_text(stmt, 1);
             const char *text = (const char *)sqlite3_column_text(stmt, 2);
             int64_t date = sqlite3_column_int64(stmt, 3);
             int isFromMe = sqlite3_column_int(stmt, 4);
@@ -646,11 +945,12 @@ void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput) {
                                                         withString:@" "];
             msgText = truncStr(msgText, 60);
 
-            printf("[%s] %s → %s: %s\n",
+            printf("[%s] %s → %s: %s\n  guid: %s\n",
                    [formatMsgDateShort(d) UTF8String],
                    [truncStr(chatName, 20) UTF8String],
                    [truncStr(sender, 15) UTF8String],
-                   [msgText UTF8String]);
+                   [msgText UTF8String],
+                   guid ?: "");
             idx++;
         }
         if (idx == 0) {
@@ -1510,6 +1810,7 @@ void printMsgHelp(void) {
 "SUBCOMMANDS:\n"
 "  list          List conversations\n"
 "  show <chat>   View messages in a conversation\n"
+"  context <guid> Show messages around a specific message\n"
 "  search        Search all messages\n"
 "  send          Send a text message\n"
 "  attach        Send a file attachment\n"
@@ -1571,6 +1872,25 @@ void printMsgSubcommandHelp(const char *sub) {
 "    cider msg show 1\n"
 "    cider msg show +1234567890 --limit 100\n"
 "    cider msg show 1 --after 2024-01-01 --json\n"
+        );
+    } else if (strcmp(sub, "context") == 0) {
+        printf(
+"cider msg context <message-guid> [options]\n"
+"\n"
+"  Show messages around a specific message in its conversation.\n"
+"  Use message GUIDs from 'cider msg search --json' or 'cider msg show --json'.\n"
+"\n"
+"  --context N    Messages before/after (default 10)\n"
+"  --before       Only show older messages (scroll up)\n"
+"  --after        Only show newer messages (scroll down)\n"
+"  --json         JSON output\n"
+"\n"
+"  Examples:\n"
+"    cider msg search \"dinner\" --json       # find the GUID\n"
+"    cider msg context <guid>               # 10 before + 10 after\n"
+"    cider msg context <guid> --context 20  # wider window\n"
+"    cider msg context <guid> --before      # scroll up\n"
+"    cider msg context <guid> --after       # scroll down\n"
         );
     } else if (strcmp(sub, "search") == 0) {
         printf(

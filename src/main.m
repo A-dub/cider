@@ -1505,6 +1505,25 @@ static int handleMsgList(int argc, char *argv[]) {
     return 0;
 }
 
+static int handleMsgContext(int argc, char *argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: cider msg context <message-guid> [options]\n"
+                        "  --context N    Messages before/after (default 10)\n"
+                        "  --before       Only older messages\n"
+                        "  --after        Only newer messages\n"
+                        "  --json         JSON output\n");
+        return 1;
+    }
+    NSString *ctxStr = argValue(argc, argv, 4, "--context", "-c");
+    NSUInteger ctx = ctxStr ? (NSUInteger)[ctxStr intValue] : 10;
+    BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
+    const char *dir = NULL;
+    if (argHasFlag(argc, argv, 4, "--before", NULL)) dir = "before";
+    else if (argHasFlag(argc, argv, 4, "--after", NULL)) dir = "after";
+    cmdMsgContext(argv[3], ctx, jsonOut, dir);
+    return 0;
+}
+
 static int handleMsgShow(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr, "Usage: cider msg show <chat> [options]\n");
@@ -1515,7 +1534,9 @@ static int handleMsgShow(int argc, char *argv[]) {
     BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
     NSString *afterStr = argValue(argc, argv, 4, "--after", NULL);
     NSString *beforeStr = argValue(argc, argv, 4, "--before", NULL);
-    cmdMsgShow(argv[3], limit, jsonOut, afterStr, beforeStr);
+    NSString *sortStr = argValue(argc, argv, 4, "--sort", NULL);
+    BOOL sortAsc = sortStr && strcasecmp([sortStr UTF8String], "asc") == 0;
+    cmdMsgShow(argv[3], limit, jsonOut, afterStr, beforeStr, sortAsc);
     return 0;
 }
 
@@ -1528,7 +1549,91 @@ static int handleMsgSearch(int argc, char *argv[]) {
     NSString *limitStr = argValue(argc, argv, 4, "--limit", "-n");
     NSUInteger limit = limitStr ? (NSUInteger)[limitStr intValue] : 0;
     BOOL jsonOut = argHasFlag(argc, argv, 4, "--json", NULL);
-    cmdMsgSearch(query, limit, jsonOut);
+    BOOL fzfOut = argHasFlag(argc, argv, 4, "--fzf", NULL);
+    NSString *sortStr = argValue(argc, argv, 4, "--sort", NULL);
+    BOOL sortAsc = sortStr && strcasecmp([sortStr UTF8String], "asc") == 0;
+
+    if (fzfOut) {
+        // Pipe search results through fzf, then show context in less
+
+        // Build a pipe: search --fzf | fzf | cut -f1
+        // We write search results to a temp file, then exec fzf on it
+        NSString *tmpFile = [NSTemporaryDirectory()
+            stringByAppendingPathComponent:@"cider-msg-search.tsv"];
+        FILE *saved = freopen([tmpFile UTF8String], "w", stdout);
+        if (!saved) {
+            fprintf(stderr, "Cannot create temp file\n");
+            return 1;
+        }
+        cmdMsgSearch(query, limit, NO, sortAsc, YES);
+        fflush(stdout);
+        freopen("/dev/tty", "w", stdout);
+
+        // Check if there were any results
+        NSDictionary *attrs = [[NSFileManager defaultManager]
+            attributesOfItemAtPath:tmpFile error:nil];
+        if (!attrs || [attrs fileSize] == 0) {
+            printf("No messages found matching \"%s\"\n",
+                   [query UTF8String]);
+            return 1;
+        }
+
+        // Run fzf
+        NSString *fzfCmd = [NSString stringWithFormat:
+            @"cat '%@' | fzf --delimiter='\\t' --with-nth=2.. "
+            @"--preview-window=hidden --no-multi "
+            @"--header='Select a message to view in context'",
+            tmpFile];
+        FILE *fzf = popen([fzfCmd UTF8String], "r");
+        if (!fzf) {
+            fprintf(stderr, "Cannot run fzf. Is it installed?\n");
+            return 1;
+        }
+        char buf[4096];
+        NSMutableString *selection = [NSMutableString string];
+        while (fgets(buf, sizeof(buf), fzf)) {
+            [selection appendString:[NSString stringWithUTF8String:buf]];
+        }
+        int fzfExit = pclose(fzf);
+        [[NSFileManager defaultManager] removeItemAtPath:tmpFile error:nil];
+
+        if (fzfExit != 0 || selection.length == 0) {
+            return 0; // User cancelled fzf
+        }
+
+        // Extract GUID (first tab-delimited field)
+        NSString *guid = [[selection componentsSeparatedByString:@"\t"]
+            firstObject];
+        guid = [guid stringByTrimmingCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+        if (guid.length > 0) {
+            // Dump a large context window to a temp file, then open in less
+            // jumping to the target message (marked with >>>)
+            NSString *ctxFile = [NSTemporaryDirectory()
+                stringByAppendingPathComponent:@"cider-msg-context.txt"];
+            FILE *cf = freopen([ctxFile UTF8String], "w", stdout);
+            if (!cf) {
+                freopen("/dev/tty", "w", stdout);
+                fprintf(stderr, "Cannot create temp file\n");
+                return 1;
+            }
+            // Use a large context window so there's plenty to scroll
+            cmdMsgContext([guid UTF8String], 500, NO, NULL);
+            fflush(stdout);
+            freopen("/dev/tty", "w", stdout);
+
+            // Open in less, jumping to the >>> marker
+            NSString *lessCmd = [NSString stringWithFormat:
+                @"less -R '+/^>>>' '%@'", ctxFile];
+            int rc = system([lessCmd UTF8String]);
+            [[NSFileManager defaultManager] removeItemAtPath:ctxFile error:nil];
+            return rc == 0 ? 0 : 1;
+        }
+        return 0;
+    }
+
+    cmdMsgSearch(query, limit, jsonOut, sortAsc, NO);
     return 0;
 }
 
@@ -1879,9 +1984,11 @@ static const CiderCommand g_commands[] = {
     {"msg", "list",          NULL,       "List conversations",
      "--limit -n --service --json", handleMsgList},
     {"msg", "show",          NULL,       "View messages in a chat",
-     "--limit -n --after --before --json", handleMsgShow},
+     "--limit -n --after --before --sort --json", handleMsgShow},
+    {"msg", "context",       NULL,       "Show messages around a specific message",
+     "--context -c --before --after --json", handleMsgContext},
     {"msg", "search",        NULL,       "Search all messages",
-     "--limit -n --json", handleMsgSearch},
+     "--limit -n --sort --fzf --json", handleMsgSearch},
     {"msg", "send",          NULL,       "Send a text message",
      "--service", handleMsgSend},
     {"msg", "attach",        NULL,       "Send a file attachment",
@@ -2224,7 +2331,7 @@ int main(int argc, char *argv[]) {
             // Bare number → show chat
             if ([sub intValue] > 0 && [sub isEqualToString:
                 [NSString stringWithFormat:@"%d", [sub intValue]]]) {
-                cmdMsgShow([sub UTF8String], 0, NO, nil, nil);
+                cmdMsgShow([sub UTF8String], 0, NO, nil, nil, NO);
                 return 0;
             }
 

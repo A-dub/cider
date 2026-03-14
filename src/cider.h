@@ -195,8 +195,11 @@ void closeMessagesDB(void);
 
 void cmdMsgList(NSUInteger limit, BOOL jsonOutput, NSString *service);
 void cmdMsgShow(const char *chatRef, NSUInteger limit, BOOL jsonOutput,
-                NSString *afterStr, NSString *beforeStr);
-void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput);
+                NSString *afterStr, NSString *beforeStr, BOOL sortAsc);
+void cmdMsgContext(const char *msgGuid, NSUInteger context, BOOL jsonOutput,
+                   const char *direction);
+void cmdMsgSearch(NSString *query, NSUInteger limit, BOOL jsonOutput,
+                  BOOL sortAsc, BOOL fzfOutput);
 void cmdMsgCount(const char *chatRef, BOOL jsonOutput);
 void cmdMsgContacts(NSUInteger limit, BOOL jsonOutput, NSString *service);
 void cmdMsgInfo(const char *chatRef, BOOL jsonOutput);
